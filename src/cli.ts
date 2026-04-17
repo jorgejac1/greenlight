@@ -5,6 +5,7 @@ import { parseTodo } from "./parser.js";
 import { runContract } from "./verifier.js";
 import { updateTodo } from "./writer.js";
 import { startMcpServer } from "./mcp.js";
+import { startWatcher } from "./watcher.js";
 import type { RunResult } from "./types.js";
 
 const COLOR = process.stdout.isTTY && !process.env.NO_COLOR;
@@ -201,6 +202,7 @@ ${C.bold}USAGE${C.reset}
   greenlight list   [path]        List contracts and their status
   greenlight retry  <id> [path]   Rerun a single contract and show failure context
   greenlight serve  [cwd]         Start MCP server on stdio
+  greenlight watch  [path]        Start trigger daemon (schedule/watch/webhook)
   greenlight help                 Show this message
 
 ${C.bold}CONTRACT FORMAT${C.reset} (todo.md)
@@ -238,6 +240,32 @@ async function main(): Promise<void> {
       const cwd = args[0] ? resolve(args[0]) : process.cwd();
       startMcpServer(cwd);
       // startMcpServer keeps the process alive via readline — don't exit
+      return;
+    }
+    case "watch": {
+      const todoPath = resolve(args[0] ?? "todo.md");
+      const portArg = args.find((a) => a.startsWith("--port="));
+      const port = portArg ? parseInt(portArg.split("=")[1], 10) : 7778;
+      const noSchedule = args.includes("--no-schedule");
+      const noWatch = args.includes("--no-watch");
+      const noWebhook = args.includes("--no-webhook");
+
+      if (!existsSync(todoPath)) {
+        console.error(`${C.red}greenlight: file not found: ${todoPath}${C.reset}`);
+        process.exit(1);
+      }
+
+      const handle = startWatcher({
+        todoPath,
+        webhookPort: port,
+        enableSchedule: !noSchedule,
+        enableWatch: !noWatch,
+        enableWebhook: !noWebhook,
+      });
+
+      process.on("SIGINT", () => { handle.stop(); process.exit(0); });
+      process.on("SIGTERM", () => { handle.stop(); process.exit(0); });
+      // Keep process alive — watcher engines hold open handles
       return;
     }
     case "help":

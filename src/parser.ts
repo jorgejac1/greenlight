@@ -1,4 +1,4 @@
-import type { Contract, Verifier } from "./types.js";
+import type { Contract, ContractTrigger, Verifier } from "./types.js";
 
 const CHECKBOX_RE = /^(\s*)-\s+\[([ xX])\]\s+(.*)$/;
 const SUB_BULLET_RE = /^(\s+)-\s+([a-zA-Z][\w-]*)\s*:\s*(.*)$/;
@@ -54,6 +54,7 @@ export function parseTodo(source: string): Contract[] {
       verifier: buildVerifier(fields),
       retries: fields.retries ? parseInt(fields.retries, 10) : undefined,
       budget: fields.budget ? parseBudget(fields.budget) : undefined,
+      trigger: buildTrigger(fields),
       line: i,
       rawLines,
     });
@@ -67,6 +68,40 @@ export function parseTodo(source: string): Contract[] {
 function buildVerifier(fields: Record<string, string>): Verifier | undefined {
   if (!fields.eval) return undefined;
   return { kind: "shell", command: fields.eval };
+}
+
+/**
+ * Parse the `on:` field into a typed ContractTrigger.
+ *
+ * Supported formats:
+ *   - on: schedule: "0 2 * * *"
+ *   - on: watch: "src/auth/**"
+ *   - on: webhook: "/ci-passed"
+ */
+function buildTrigger(fields: Record<string, string>): ContractTrigger | undefined {
+  const raw = fields["on"];
+  if (!raw) return undefined;
+
+  // Try "schedule: <cron>"
+  const scheduleMatch = raw.match(/^schedule:\s*["']?([^"']+)["']?$/i);
+  if (scheduleMatch) {
+    return { kind: "schedule", cron: scheduleMatch[1].trim() };
+  }
+
+  // Try "watch: <glob>"
+  const watchMatch = raw.match(/^watch:\s*["']?([^"']+)["']?$/i);
+  if (watchMatch) {
+    return { kind: "watch", glob: watchMatch[1].trim() };
+  }
+
+  // Try "webhook: <path>"
+  const webhookMatch = raw.match(/^webhook:\s*["']?([^"']+)["']?$/i);
+  if (webhookMatch) {
+    const path = webhookMatch[1].trim();
+    return { kind: "webhook", path: path.startsWith("/") ? path : `/${path}` };
+  }
+
+  return undefined;
 }
 
 function stripBackticks(s: string): string {

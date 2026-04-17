@@ -124,8 +124,9 @@ describe("MCP server — protocol handshake", () => {
       ]);
       const result = resp.result as Record<string, unknown>;
       const tools = result["tools"] as unknown[];
-      assert.equal(tools.length, 5);
+      assert.equal(tools.length, 6);
       const names = tools.map((t) => (t as Record<string, unknown>)["name"]);
+      assert.ok(names.includes("list_triggers"));
       assert.ok(names.includes("list_all"));
       assert.ok(names.includes("list_pending"));
       assert.ok(names.includes("run_eval"));

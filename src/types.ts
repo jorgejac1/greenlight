@@ -21,6 +21,8 @@ export interface Contract {
   line: number;
   /** All source lines belonging to this contract (checkbox + sub-bullets). */
   rawLines: number[];
+  /** Trigger that fires this contract automatically (v0.3). */
+  trigger?: ContractTrigger;
 }
 
 export type Status = "pending" | "passed" | "failed";
@@ -38,6 +40,30 @@ export interface CompositeVerifier {
 }
 
 export type Verifier = ShellVerifier | CompositeVerifier;
+
+// ---------------------------------------------------------------------------
+// Trigger types (v0.3)
+// ---------------------------------------------------------------------------
+
+export interface ScheduleTrigger {
+  kind: "schedule";
+  /** 5-field cron expression, e.g. "0 2 * * *" */
+  cron: string;
+}
+
+export interface WatchTrigger {
+  kind: "watch";
+  /** Glob pattern relative to todo.md directory, e.g. "src/auth/**" */
+  glob: string;
+}
+
+export interface WebhookTrigger {
+  kind: "webhook";
+  /** URL path to listen on, e.g. "/ci-passed" */
+  path: string;
+}
+
+export type ContractTrigger = ScheduleTrigger | WatchTrigger | WebhookTrigger;
 
 export interface RunResult {
   contract: Contract;

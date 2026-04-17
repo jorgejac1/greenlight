@@ -32,6 +32,20 @@ import type {
 
 const TOOLS: McpToolDefinition[] = [
   {
+    name: "list_triggers",
+    description:
+      "List all contracts that have an automatic trigger (schedule, watch, or webhook). Shows what will fire without manual intervention.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Path to todo.md. Defaults to ./todo.md.",
+        },
+      },
+    },
+  },
+  {
     name: "list_all",
     description:
       "List all contracts in the todo.md file — checked and unchecked, with and without verifiers. Shows current status of the full project.",
@@ -154,6 +168,24 @@ function formatResult(result: RunResult): Record<string, unknown> {
 // ---------------------------------------------------------------------------
 
 type Params = Record<string, unknown>;
+
+async function handleListTriggers(params: Params, serverCwd: string): Promise<unknown> {
+  const todoPath = resolveTodoPath(params["path"], serverCwd);
+  const loaded = loadContracts(todoPath);
+  if ("error" in loaded) return { error: loaded.error };
+
+  const triggered = loaded.contracts.filter((c) => c.trigger);
+  return {
+    count: triggered.length,
+    contracts: triggered.map((c) => ({
+      id: c.id,
+      title: c.title,
+      checked: c.checked,
+      trigger: c.trigger,
+      verifier: c.verifier?.kind === "shell" ? c.verifier.command : c.verifier ? "composite" : null,
+    })),
+  };
+}
 
 async function handleListAll(params: Params, serverCwd: string): Promise<unknown> {
   const todoPath = resolveTodoPath(params["path"], serverCwd);
@@ -341,6 +373,9 @@ async function dispatch(req: McpJsonRpcRequest, serverCwd: string): Promise<void
 
     let result: unknown;
     switch (toolName) {
+      case "list_triggers":
+        result = await handleListTriggers(toolParams, serverCwd);
+        break;
       case "list_all":
         result = await handleListAll(toolParams, serverCwd);
         break;

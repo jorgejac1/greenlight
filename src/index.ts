@@ -2,6 +2,8 @@ export { parseTodo } from "./parser.js";
 export { runContract, runShell } from "./verifier.js";
 export { updateTodo } from "./writer.js";
 export { startMcpServer } from "./mcp.js";
+export { startWatcher, matchesGlob } from "./watcher.js";
+export { parseCron, matchesCron, nextFireMs } from "./cron.js";
 export type {
   Contract,
   Status,
@@ -9,6 +11,10 @@ export type {
   ShellVerifier,
   CompositeVerifier,
   RunResult,
+  ContractTrigger,
+  ScheduleTrigger,
+  WatchTrigger,
+  WebhookTrigger,
   McpJsonRpcRequest,
   McpJsonRpcResponse,
   McpToolDefinition,
