@@ -1,0 +1,44 @@
+{
+  "name": "greenlight",
+  "version": "0.1.0",
+  "description": "Eval-gated todos for agentic coding. Your agents can't tick the checkbox until the verifier passes.",
+  "type": "module",
+  "bin": {
+    "greenlight": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "hooks",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "test": "node --test --import tsx test/*.test.ts",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "claude-code",
+    "codex",
+    "mcp",
+    "ai-agents",
+    "agentic-workflow",
+    "todo",
+    "evals",
+    "verifier",
+    "coding-agent"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
