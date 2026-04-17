@@ -79,7 +79,7 @@ a **contract**: each todo is a unit of work with a built-in quality gate. That u
 npm install -g evalgate
 
 # Or clone + link for development
-git clone https://github.com/jorgejac1/greenlight
+git clone https://github.com/jorgejac1/evalgate
 cd greenlight  # repo folder name unchanged
 pnpm install && pnpm build && npm link
 ```
