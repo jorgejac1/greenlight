@@ -7,14 +7,9 @@
  * Zero runtime dependencies.
  */
 
-import {
-  appendFileSync,
-  readFileSync,
-  mkdirSync,
-  existsSync,
-} from "node:fs";
-import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { logDir } from "./log.js";
 import type { AgentMessage, MessageKind } from "./types.js";
 
@@ -23,7 +18,7 @@ import type { AgentMessage, MessageKind } from "./types.js";
 // ---------------------------------------------------------------------------
 
 export function messagesPath(todoPath: string): string {
-  return join(logDir(todoPath), "messages.ndjson");
+	return join(logDir(todoPath), "messages.ndjson");
 }
 
 // ---------------------------------------------------------------------------
@@ -31,33 +26,30 @@ export function messagesPath(todoPath: string): string {
 // ---------------------------------------------------------------------------
 
 export interface SendMessageOptions {
-  from: string;
-  to: string;
-  kind: MessageKind;
-  payload?: unknown;
-  contractId?: string;
-  correlationId?: string;
+	from: string;
+	to: string;
+	kind: MessageKind;
+	payload?: unknown;
+	contractId?: string;
+	correlationId?: string;
 }
 
-export function sendMessage(
-  todoPath: string,
-  opts: SendMessageOptions
-): AgentMessage {
-  const msg: AgentMessage = {
-    id: randomUUID(),
-    ts: new Date().toISOString(),
-    from: opts.from,
-    to: opts.to,
-    kind: opts.kind,
-    contractId: opts.contractId,
-    payload: opts.payload ?? null,
-    correlationId: opts.correlationId,
-  };
+export function sendMessage(todoPath: string, opts: SendMessageOptions): AgentMessage {
+	const msg: AgentMessage = {
+		id: randomUUID(),
+		ts: new Date().toISOString(),
+		from: opts.from,
+		to: opts.to,
+		kind: opts.kind,
+		contractId: opts.contractId,
+		payload: opts.payload ?? null,
+		correlationId: opts.correlationId,
+	};
 
-  const dir = logDir(todoPath);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  appendFileSync(messagesPath(todoPath), JSON.stringify(msg) + "\n", "utf8");
-  return msg;
+	const dir = logDir(todoPath);
+	if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+	appendFileSync(messagesPath(todoPath), `${JSON.stringify(msg)}\n`, "utf8");
+	return msg;
 }
 
 // ---------------------------------------------------------------------------
@@ -65,52 +57,49 @@ export function sendMessage(
 // ---------------------------------------------------------------------------
 
 export interface ListMessagesOptions {
-  to?: string;         // filter by recipient (matches "*" broadcasts too)
-  from?: string;
-  kind?: MessageKind;
-  contractId?: string;
-  limit?: number;
+	to?: string; // filter by recipient (matches "*" broadcasts too)
+	from?: string;
+	kind?: MessageKind;
+	contractId?: string;
+	limit?: number;
 }
 
-export function listMessages(
-  todoPath: string,
-  opts: ListMessagesOptions = {}
-): AgentMessage[] {
-  const path = messagesPath(todoPath);
-  if (!existsSync(path)) return [];
+export function listMessages(todoPath: string, opts: ListMessagesOptions = {}): AgentMessage[] {
+	const path = messagesPath(todoPath);
+	if (!existsSync(path)) return [];
 
-  const raw = readFileSync(path, "utf8");
-  const lines = raw.split("\n").filter(Boolean);
+	const raw = readFileSync(path, "utf8");
+	const lines = raw.split("\n").filter(Boolean);
 
-  const messages: AgentMessage[] = [];
-  for (const line of lines) {
-    try {
-      messages.push(JSON.parse(line) as AgentMessage);
-    } catch {
-      // Skip malformed lines
-    }
-  }
+	const messages: AgentMessage[] = [];
+	for (const line of lines) {
+		try {
+			messages.push(JSON.parse(line) as AgentMessage);
+		} catch {
+			// Skip malformed lines
+		}
+	}
 
-  let filtered = messages;
-  if (opts.to !== undefined) {
-    filtered = filtered.filter((m) => m.to === opts.to || m.to === "*");
-  }
-  if (opts.from !== undefined) {
-    filtered = filtered.filter((m) => m.from === opts.from);
-  }
-  if (opts.kind !== undefined) {
-    filtered = filtered.filter((m) => m.kind === opts.kind);
-  }
-  if (opts.contractId !== undefined) {
-    filtered = filtered.filter((m) => m.contractId === opts.contractId);
-  }
+	let filtered = messages;
+	if (opts.to !== undefined) {
+		filtered = filtered.filter((m) => m.to === opts.to || m.to === "*");
+	}
+	if (opts.from !== undefined) {
+		filtered = filtered.filter((m) => m.from === opts.from);
+	}
+	if (opts.kind !== undefined) {
+		filtered = filtered.filter((m) => m.kind === opts.kind);
+	}
+	if (opts.contractId !== undefined) {
+		filtered = filtered.filter((m) => m.contractId === opts.contractId);
+	}
 
-  // Most recent first
-  filtered.reverse();
+	// Most recent first
+	filtered.reverse();
 
-  if (opts.limit !== undefined && opts.limit > 0) {
-    filtered = filtered.slice(0, opts.limit);
-  }
+	if (opts.limit !== undefined && opts.limit > 0) {
+		filtered = filtered.slice(0, opts.limit);
+	}
 
-  return filtered;
+	return filtered;
 }

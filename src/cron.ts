@@ -12,11 +12,11 @@
  */
 
 export interface CronExpr {
-  minutes: number[];
-  hours: number[];
-  days: number[];
-  months: number[];
-  weekdays: number[];
+	minutes: number[];
+	hours: number[];
+	days: number[];
+	months: number[];
+	weekdays: number[];
 }
 
 /**
@@ -24,18 +24,18 @@ export interface CronExpr {
  * Throws if the expression is invalid.
  */
 export function parseCron(expr: string): CronExpr {
-  const fields = expr.trim().split(/\s+/);
-  if (fields.length !== 5) {
-    throw new Error(`Invalid cron expression (expected 5 fields): "${expr}"`);
-  }
-  const [min, hour, day, month, weekday] = fields;
-  return {
-    minutes:  expandField(min,     0, 59),
-    hours:    expandField(hour,    0, 23),
-    days:     expandField(day,     1, 31),
-    months:   expandField(month,   1, 12),
-    weekdays: expandField(weekday, 0,  6),
-  };
+	const fields = expr.trim().split(/\s+/);
+	if (fields.length !== 5) {
+		throw new Error(`Invalid cron expression (expected 5 fields): "${expr}"`);
+	}
+	const [min, hour, day, month, weekday] = fields;
+	return {
+		minutes: expandField(min, 0, 59),
+		hours: expandField(hour, 0, 23),
+		days: expandField(day, 1, 31),
+		months: expandField(month, 1, 12),
+		weekdays: expandField(weekday, 0, 6),
+	};
 }
 
 /**
@@ -43,13 +43,13 @@ export function parseCron(expr: string): CronExpr {
  * Month is 1-indexed; weekday 0=Sunday, 6=Saturday.
  */
 export function matchesCron(expr: CronExpr, date: Date): boolean {
-  return (
-    expr.minutes.includes(date.getMinutes()) &&
-    expr.hours.includes(date.getHours()) &&
-    expr.days.includes(date.getDate()) &&
-    expr.months.includes(date.getMonth() + 1) &&
-    expr.weekdays.includes(date.getDay())
-  );
+	return (
+		expr.minutes.includes(date.getMinutes()) &&
+		expr.hours.includes(date.getHours()) &&
+		expr.days.includes(date.getDate()) &&
+		expr.months.includes(date.getMonth() + 1) &&
+		expr.weekdays.includes(date.getDay())
+	);
 }
 
 /**
@@ -58,21 +58,21 @@ export function matchesCron(expr: CronExpr, date: Date): boolean {
  * Returns Infinity if no match found (shouldn't happen with valid expressions).
  */
 export function nextFireMs(expr: CronExpr, from: Date = new Date()): number {
-  // Start at the next whole minute
-  const candidate = new Date(from);
-  candidate.setSeconds(0, 0);
-  candidate.setMinutes(candidate.getMinutes() + 1);
+	// Start at the next whole minute
+	const candidate = new Date(from);
+	candidate.setSeconds(0, 0);
+	candidate.setMinutes(candidate.getMinutes() + 1);
 
-  const limit = new Date(from.getTime() + 366 * 24 * 60 * 60 * 1000);
+	const limit = new Date(from.getTime() + 366 * 24 * 60 * 60 * 1000);
 
-  while (candidate < limit) {
-    if (matchesCron(expr, candidate)) {
-      return candidate.getTime() - from.getTime();
-    }
-    candidate.setMinutes(candidate.getMinutes() + 1);
-  }
+	while (candidate < limit) {
+		if (matchesCron(expr, candidate)) {
+			return candidate.getTime() - from.getTime();
+		}
+		candidate.setMinutes(candidate.getMinutes() + 1);
+	}
 
-  return Infinity;
+	return Infinity;
 }
 
 // ---------------------------------------------------------------------------
@@ -80,56 +80,58 @@ export function nextFireMs(expr: CronExpr, from: Date = new Date()): number {
 // ---------------------------------------------------------------------------
 
 function expandField(field: string, min: number, max: number): number[] {
-  const values = new Set<number>();
+	const values = new Set<number>();
 
-  for (const part of field.split(",")) {
-    // */n — step over full range
-    const stepWildcard = part.match(/^\*\/(\d+)$/);
-    if (stepWildcard) {
-      const step = parseInt(stepWildcard[1], 10);
-      if (step < 1) throw new Error(`Invalid step in cron field: "${part}"`);
-      for (let i = min; i <= max; i += step) values.add(i);
-      continue;
-    }
+	for (const part of field.split(",")) {
+		// */n — step over full range
+		const stepWildcard = part.match(/^\*\/(\d+)$/);
+		if (stepWildcard) {
+			const step = parseInt(stepWildcard[1], 10);
+			if (step < 1) throw new Error(`Invalid step in cron field: "${part}"`);
+			for (let i = min; i <= max; i += step) values.add(i);
+			continue;
+		}
 
-    // * — wildcard
-    if (part === "*") {
-      for (let i = min; i <= max; i++) values.add(i);
-      continue;
-    }
+		// * — wildcard
+		if (part === "*") {
+			for (let i = min; i <= max; i++) values.add(i);
+			continue;
+		}
 
-    // a-b/n — range with step
-    const rangeStep = part.match(/^(\d+)-(\d+)\/(\d+)$/);
-    if (rangeStep) {
-      const [, a, b, s] = rangeStep.map(Number);
-      for (let i = a; i <= b; i += s) {
-        if (i >= min && i <= max) values.add(i);
-      }
-      continue;
-    }
+		// a-b/n — range with step
+		const rangeStep = part.match(/^(\d+)-(\d+)\/(\d+)$/);
+		if (rangeStep) {
+			const a = parseInt(rangeStep[1], 10);
+			const b = parseInt(rangeStep[2], 10);
+			const s = parseInt(rangeStep[3], 10);
+			for (let i = a; i <= b; i += s) {
+				if (i >= min && i <= max) values.add(i);
+			}
+			continue;
+		}
 
-    // a-b — range
-    const range = part.match(/^(\d+)-(\d+)$/);
-    if (range) {
-      const [, a, b] = range.map(Number);
-      for (let i = a; i <= b; i++) {
-        if (i >= min && i <= max) values.add(i);
-      }
-      continue;
-    }
+		// a-b — range
+		const range = part.match(/^(\d+)-(\d+)$/);
+		if (range) {
+			const [, a, b] = range.map(Number);
+			for (let i = a; i <= b; i++) {
+				if (i >= min && i <= max) values.add(i);
+			}
+			continue;
+		}
 
-    // n — single value
-    const n = parseInt(part, 10);
-    if (!isNaN(n)) {
-      if (n < min || n > max) {
-        throw new Error(`Cron value ${n} out of range [${min}-${max}] in field "${field}"`);
-      }
-      values.add(n);
-      continue;
-    }
+		// n — single value
+		const n = parseInt(part, 10);
+		if (!Number.isNaN(n)) {
+			if (n < min || n > max) {
+				throw new Error(`Cron value ${n} out of range [${min}-${max}] in field "${field}"`);
+			}
+			values.add(n);
+			continue;
+		}
 
-    throw new Error(`Invalid cron field part: "${part}"`);
-  }
+		throw new Error(`Invalid cron field part: "${part}"`);
+	}
 
-  return Array.from(values).sort((a, b) => a - b);
+	return Array.from(values).sort((a, b) => a - b);
 }

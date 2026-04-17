@@ -1,49 +1,53 @@
-export { parseTodo } from "./parser.js";
-export { runContract, runShell } from "./verifier.js";
-export { updateTodo } from "./writer.js";
-export { startMcpServer } from "./mcp.js";
-export { startWatcher, matchesGlob } from "./watcher.js";
-export { parseCron, matchesCron, nextFireMs } from "./cron.js";
-export { appendRun, queryRuns, getLastFailure, getLastRun, onRun } from "./log.js";
-export { sendMessage, listMessages } from "./messages.js";
-export { startUiServer } from "./ui.js";
-export { startDash } from "./dash.js";
 export {
-  reportTokenUsage,
-  queryBudgetRecords,
-  getTotalTokens,
-  getBudgetSummary,
+	getBudgetSummary,
+	getTotalTokens,
+	queryBudgetRecords,
+	reportTokenUsage,
 } from "./budget.js";
+export { matchesCron, nextFireMs, parseCron } from "./cron.js";
+export { startDash } from "./dash.js";
+export { appendRun, getLastFailure, getLastRun, onRun, queryRuns } from "./log.js";
+export { startMcpServer } from "./mcp.js";
+export type {
+	FailurePattern,
+	ProjectSnapshot,
+	SnapshotDiff,
+	SuggestResult,
+} from "./memory.js";
 export {
-  suggest,
-  detectPatterns,
-  exportSnapshot,
-  snapshotToMarkdown,
+	detectPatterns,
+	diffSnapshots,
+	diffToMarkdown,
+	exportSnapshot,
+	snapshotToMarkdown,
+	suggest,
 } from "./memory.js";
+export { listMessages, sendMessage } from "./messages.js";
+export { parseTodo } from "./parser.js";
 export type {
-  Contract,
-  Status,
-  Verifier,
-  ShellVerifier,
-  CompositeVerifier,
-  RunResult,
-  ContractTrigger,
-  ScheduleTrigger,
-  WatchTrigger,
-  WebhookTrigger,
-  TriggerSource,
-  RunRecord,
-  AgentMessage,
-  MessageKind,
-  BudgetRecord,
-  McpJsonRpcRequest,
-  McpJsonRpcResponse,
-  McpToolDefinition,
-  McpServerInfo,
-  McpCapabilities,
+	AgentMessage,
+	BudgetRecord,
+	CompositeVerifier,
+	Contract,
+	ContractTrigger,
+	LlmVerifier,
+	McpCapabilities,
+	McpJsonRpcRequest,
+	McpJsonRpcResponse,
+	McpServerInfo,
+	McpToolDefinition,
+	MessageKind,
+	RunRecord,
+	RunResult,
+	ScheduleTrigger,
+	ShellVerifier,
+	Status,
+	TriggerSource,
+	Verifier,
+	WatchTrigger,
+	WebhookTrigger,
 } from "./types.js";
-export type {
-  SuggestResult,
-  FailurePattern,
-  ProjectSnapshot,
-} from "./memory.js";
+export { startUiServer } from "./ui.js";
+export { runContract, runShell } from "./verifier.js";
+export { matchesGlob, startWatcher } from "./watcher.js";
+export { updateTodo } from "./writer.js";
