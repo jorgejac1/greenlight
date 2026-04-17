@@ -306,6 +306,8 @@ ${C.bold}USAGE${C.reset}
   greenlight msg    list [--to=<agent>] [--kind=<kind>] [path]
   greenlight serve  [cwd]               Start MCP server on stdio
   greenlight watch  [path]              Start trigger daemon (schedule/watch/webhook)
+  greenlight ui     [path] [--port=N]   Start web dashboard (default port 7777)
+  greenlight dash   [path]              Live ANSI terminal dashboard
   greenlight help                       Show this message
 
 ${C.bold}CONTRACT FORMAT${C.reset} (todo.md)
@@ -389,6 +391,48 @@ async function main(): Promise<void> {
       process.on("SIGINT", () => { handle.stop(); process.exit(0); });
       process.on("SIGTERM", () => { handle.stop(); process.exit(0); });
       // Keep process alive — watcher engines hold open handles
+      return;
+    }
+    case "ui": {
+      const flags = args.filter((a) => a.startsWith("--"));
+      const positional = args.filter((a) => !a.startsWith("--"));
+      const todoPath = resolve(positional[0] ?? "todo.md");
+      const portArg = flags.find((a) => a.startsWith("--port="));
+      const port = portArg ? parseInt(portArg.split("=")[1], 10) : 7777;
+
+      if (!existsSync(todoPath)) {
+        console.error(`${C.red}greenlight: file not found: ${todoPath}${C.reset}`);
+        process.exit(1);
+      }
+
+      const { startUiServer } = await import("./ui.js");
+      const handle = startUiServer({ todoPath, port });
+
+      console.log(
+        `${C.bold}greenlight ui${C.reset} ${C.dim}·${C.reset} ` +
+        `${C.cyan}http://localhost:${handle.port}${C.reset} ` +
+        `${C.dim}· ${todoPath}${C.reset}`
+      );
+      console.log(`${C.dim}Press Ctrl+C to stop.${C.reset}`);
+
+      process.on("SIGINT", () => { handle.stop(); process.exit(0); });
+      process.on("SIGTERM", () => { handle.stop(); process.exit(0); });
+      return;
+    }
+    case "dash": {
+      const positional = args.filter((a) => !a.startsWith("--"));
+      const todoPath = resolve(positional[0] ?? "todo.md");
+
+      if (!existsSync(todoPath)) {
+        console.error(`${C.red}greenlight: file not found: ${todoPath}${C.reset}`);
+        process.exit(1);
+      }
+
+      const { startDash } = await import("./dash.js");
+      const handle = startDash(todoPath);
+
+      process.on("SIGINT", () => { handle.stop(); process.exit(0); });
+      process.on("SIGTERM", () => { handle.stop(); process.exit(0); });
       return;
     }
     case "help":

@@ -17,6 +17,19 @@ import { randomUUID } from "node:crypto";
 import type { RunResult, RunRecord, TriggerSource } from "./types.js";
 
 // ---------------------------------------------------------------------------
+// In-process SSE emitter — listeners are notified after each run is appended
+// ---------------------------------------------------------------------------
+
+type RunListener = (record: RunRecord) => void;
+const _runListeners = new Set<RunListener>();
+
+/** Subscribe to run completions. Returns an unsubscribe function. */
+export function onRun(listener: RunListener): () => void {
+  _runListeners.add(listener);
+  return () => { _runListeners.delete(listener); };
+}
+
+// ---------------------------------------------------------------------------
 // Path helpers
 // ---------------------------------------------------------------------------
 
@@ -57,6 +70,12 @@ export function appendRun(
 
   ensureDir(todoPath);
   appendFileSync(runsPath(todoPath), JSON.stringify(record) + "\n", "utf8");
+
+  // Notify in-process listeners (SSE server, dash)
+  for (const fn of _runListeners) {
+    try { fn(record); } catch { /* ignore listener errors */ }
+  }
+
   return record;
 }
 
