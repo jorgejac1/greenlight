@@ -8,6 +8,7 @@ import { startMcpServer } from "./mcp.js";
 import { startWatcher } from "./watcher.js";
 import { queryRuns, getLastFailure } from "./log.js";
 import { sendMessage, listMessages } from "./messages.js";
+import { reportTokenUsage, getBudgetSummary, getTotalTokens } from "./budget.js";
 import type { RunResult } from "./types.js";
 
 const COLOR = process.stdout.isTTY && !process.env.NO_COLOR;
@@ -241,6 +242,90 @@ async function cmdLog(todoPath: string, args: string[]): Promise<number> {
   return 0;
 }
 
+async function cmdBudget(todoPath: string, args: string[]): Promise<number> {
+  if (!existsSync(todoPath)) {
+    console.error(`${C.red}greenlight: file not found: ${todoPath}${C.reset}`);
+    return 1;
+  }
+
+  const source = readFileSync(todoPath, "utf8");
+  const contracts = parseTodo(source);
+
+  // Sub-command: greenlight budget <id> <tokens> — record usage
+  const positional = args.filter((a) => !a.startsWith("--"));
+  if (positional.length >= 2) {
+    const [contractId, tokensRaw] = positional;
+    const tokens = parseInt(tokensRaw, 10);
+    if (isNaN(tokens) || tokens < 0) {
+      console.error(`${C.red}greenlight budget: tokens must be a non-negative integer${C.reset}`);
+      return 1;
+    }
+    const contract = contracts.find(
+      (c) => c.id === contractId || c.title.toLowerCase() === contractId.toLowerCase()
+    );
+    if (!contract) {
+      console.error(`${C.red}greenlight: contract not found: ${contractId}${C.reset}`);
+      return 1;
+    }
+    const record = reportTokenUsage(todoPath, contract.id, tokens, contract);
+    const total = getTotalTokens(todoPath, contract.id);
+    console.log(
+      `${C.green}recorded${C.reset} ${tokens.toLocaleString()} tokens for ${C.bold}${contract.title}${C.reset}` +
+      ` ${C.dim}(total: ${total.toLocaleString()}${contract.budget ? ` / ${contract.budget.toLocaleString()}` : ""})${C.reset}`
+    );
+    if (contract.budget && total > contract.budget) {
+      console.log(`${C.red}⚠ budget exceeded by ${(total - contract.budget).toLocaleString()} tokens${C.reset}`);
+    }
+    void record;
+    return 0;
+  }
+
+  // Default: show budget summary table
+  const summary = getBudgetSummary(todoPath, contracts);
+  const anyBudget = summary.some((s) => s.budget !== undefined || s.used > 0);
+
+  if (!anyBudget) {
+    console.log(`${C.dim}no budget data yet — use: greenlight budget <id> <tokens>${C.reset}`);
+    return 0;
+  }
+
+  console.log(
+    `${C.bold}greenlight budget${C.reset} ${C.dim}· ${basename(todoPath)}${C.reset}\n`
+  );
+
+  for (const s of summary) {
+    if (s.budget === undefined && s.used === 0) continue;
+
+    const status = s.exceeded
+      ? `${C.red}exceeded${C.reset}`
+      : s.budget !== undefined
+      ? `${C.green}ok${C.reset}`
+      : `${C.dim}no limit${C.reset}`;
+
+    const bar = s.budget && s.budget > 0
+      ? buildBar(s.used, s.budget, 20)
+      : "";
+
+    console.log(`  ${C.bold}${s.contractTitle}${C.reset} ${C.dim}(${s.contractId})${C.reset}`);
+    console.log(
+      `  ${C.dim}used:${C.reset} ${s.used.toLocaleString()}` +
+      (s.budget ? ` ${C.dim}/ ${s.budget.toLocaleString()}${C.reset}` : "") +
+      (bar ? `  ${bar}` : "") +
+      `  ${status}`
+    );
+  }
+
+  return 0;
+}
+
+function buildBar(used: number, budget: number, width: number): string {
+  const pct = Math.min(1, used / budget);
+  const filled = Math.round(pct * width);
+  const empty = width - filled;
+  const color = pct >= 1 ? C.red : pct >= 0.8 ? C.yellow : C.green;
+  return color + "█".repeat(filled) + C.dim + "░".repeat(empty) + C.reset;
+}
+
 async function cmdMsg(subCmd: string, args: string[], todoPath: string): Promise<number> {
   if (subCmd === "send") {
     const [from, to, kind, payloadRaw] = args;
@@ -308,6 +393,8 @@ ${C.bold}USAGE${C.reset}
   greenlight watch  [path]              Start trigger daemon (schedule/watch/webhook)
   greenlight ui     [path] [--port=N]   Start web dashboard (default port 7777)
   greenlight dash   [path]              Live ANSI terminal dashboard
+  greenlight budget [path]              Show per-contract token spend vs budget
+  greenlight budget <id> <tokens> [path]  Record token usage for a contract
   greenlight help                       Show this message
 
 ${C.bold}CONTRACT FORMAT${C.reset} (todo.md)
@@ -392,6 +479,30 @@ async function main(): Promise<void> {
       process.on("SIGTERM", () => { handle.stop(); process.exit(0); });
       // Keep process alive — watcher engines hold open handles
       return;
+    }
+    case "budget": {
+      const flags = args.filter((a) => a.startsWith("--"));
+      const positional = args.filter((a) => !a.startsWith("--"));
+      let todoPath: string;
+      let subArgs: string[];
+      // Detect path: first arg that ends in .md or resolves to an existing file
+      const firstLooksLikePath =
+        positional.length > 0 &&
+        (positional[0].endsWith(".md") || existsSync(resolve(positional[0])));
+      if (firstLooksLikePath) {
+        // budget [path] [id] [tokens]
+        todoPath = resolve(positional[0]);
+        subArgs = [...positional.slice(1), ...flags];
+      } else if (positional.length >= 2) {
+        // budget <id> <tokens> [path]
+        todoPath = resolve(positional[2] ?? "todo.md");
+        subArgs = [...positional.slice(0, 2), ...flags];
+      } else {
+        todoPath = resolve("todo.md");
+        subArgs = [...positional, ...flags];
+      }
+      exitCode = await cmdBudget(todoPath, subArgs);
+      break;
     }
     case "ui": {
       const flags = args.filter((a) => a.startsWith("--"));

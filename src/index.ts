@@ -8,7 +8,14 @@ export { appendRun, queryRuns, getLastFailure, getLastRun, onRun } from "./log.j
 export { sendMessage, listMessages } from "./messages.js";
 export { startUiServer } from "./ui.js";
 export { startDash } from "./dash.js";
+export {
+  reportTokenUsage,
+  queryBudgetRecords,
+  getTotalTokens,
+  getBudgetSummary,
+} from "./budget.js";
 export type {
+  BudgetRecord,
   Contract,
   Status,
   Verifier,

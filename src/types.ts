@@ -23,6 +23,24 @@ export interface Contract {
   rawLines: number[];
   /** Trigger that fires this contract automatically (v0.3). */
   trigger?: ContractTrigger;
+  /** Preferred model for the agent working this contract (v0.6). */
+  provider?: "opus" | "sonnet" | "haiku";
+  /** Role hint for orchestrators (v0.6). */
+  role?: "coordinator" | "worker" | "linter";
+  /** Whitelist of MCP server names this contract's worker may access (v0.6). */
+  mcpServers?: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Budget tracking types (v0.6)
+// ---------------------------------------------------------------------------
+
+/** A single token usage report, appended to .greenlight/budget.ndjson */
+export interface BudgetRecord {
+  id: string;
+  ts: string;        // ISO 8601
+  contractId: string;
+  tokens: number;
 }
 
 export type Status = "pending" | "passed" | "failed";
@@ -105,7 +123,8 @@ export type MessageKind =
   | "blocker"
   | "review_request"
   | "status_update"
-  | "retry_request";
+  | "retry_request"
+  | "budget_exceeded";
 
 /** A typed envelope for agent-to-agent communication stored in .greenlight/messages.ndjson */
 export interface AgentMessage {

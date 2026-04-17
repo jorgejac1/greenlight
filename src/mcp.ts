@@ -20,6 +20,7 @@ import { runContract } from "./verifier.js";
 import { updateTodo } from "./writer.js";
 import { queryRuns, getLastFailure } from "./log.js";
 import { sendMessage, listMessages } from "./messages.js";
+import { reportTokenUsage, getTotalTokens, getBudgetSummary } from "./budget.js";
 import type {
   McpJsonRpcRequest,
   McpJsonRpcResponse,
@@ -202,6 +203,31 @@ const TOOLS: McpToolDefinition[] = [
         limit: { type: "number", description: "Max messages to return (default 20)." },
         path: { type: "string", description: "Path to todo.md. Defaults to ./todo.md." },
       },
+    },
+  },
+  {
+    name: "get_provider_hints",
+    description:
+      "Return provider routing hints for all contracts: preferred model (opus/sonnet/haiku), role (coordinator/worker/linter), allowed MCP servers, and budget. Orchestrators use this to route the right model to each task.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Path to todo.md. Defaults to ./todo.md." },
+      },
+    },
+  },
+  {
+    name: "report_token_usage",
+    description:
+      "Report how many tokens were consumed working on a contract. Greenlight persists this in .greenlight/budget.ndjson and emits a budget_exceeded message if the contract's budget is breached.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        contract_id: { type: "string", description: "The contract id (slug)." },
+        tokens: { type: "number", description: "Number of tokens used in this session." },
+        path: { type: "string", description: "Path to todo.md. Defaults to ./todo.md." },
+      },
+      required: ["contract_id", "tokens"],
     },
   },
 ];
@@ -452,6 +478,60 @@ async function handleSendMessage(params: Params, serverCwd: string): Promise<unk
   return msg;
 }
 
+async function handleGetProviderHints(params: Params, serverCwd: string): Promise<unknown> {
+  const todoPath = resolveTodoPath(params["path"], serverCwd);
+  const loaded = loadContracts(todoPath);
+  if ("error" in loaded) return { error: loaded.error };
+
+  const summary = getBudgetSummary(todoPath, loaded.contracts);
+  const usageById = new Map(summary.map((s) => [s.contractId, s]));
+
+  return {
+    count: loaded.contracts.length,
+    contracts: loaded.contracts.map((c) => {
+      const usage = usageById.get(c.id);
+      return {
+        id: c.id,
+        title: c.title,
+        status: c.checked ? "done" : c.verifier ? "pending" : "ungated",
+        provider: c.provider ?? null,
+        role: c.role ?? null,
+        mcpServers: c.mcpServers ?? null,
+        budget: c.budget ?? null,
+        tokensUsed: usage?.used ?? 0,
+        budgetExceeded: usage?.exceeded ?? false,
+      };
+    }),
+  };
+}
+
+async function handleReportTokenUsage(params: Params, serverCwd: string): Promise<unknown> {
+  const contractId = params["contract_id"];
+  const tokens = params["tokens"];
+
+  if (typeof contractId !== "string" || !contractId.trim()) {
+    return { error: "contract_id is required" };
+  }
+  if (typeof tokens !== "number" || tokens < 0) {
+    return { error: "tokens must be a non-negative number" };
+  }
+
+  const todoPath = resolveTodoPath(params["path"], serverCwd);
+  const loaded = loadContracts(todoPath);
+  if ("error" in loaded) return { error: loaded.error };
+
+  const contract = findContract(loaded.contracts, contractId);
+  const record = reportTokenUsage(todoPath, contractId, tokens, contract);
+  const total = getTotalTokens(todoPath, contractId);
+
+  return {
+    recorded: record,
+    totalTokens: total,
+    budget: contract?.budget ?? null,
+    budgetExceeded: contract?.budget !== undefined && total > contract.budget,
+  };
+}
+
 async function handleListMessages(params: Params, serverCwd: string): Promise<unknown> {
   const todoPath = resolveTodoPath(params["path"], serverCwd);
   const to = typeof params["to"] === "string" ? params["to"] : undefined;
@@ -541,6 +621,12 @@ async function dispatch(req: McpJsonRpcRequest, serverCwd: string): Promise<void
         break;
       case "list_messages":
         result = await handleListMessages(toolParams, serverCwd);
+        break;
+      case "get_provider_hints":
+        result = await handleGetProviderHints(toolParams, serverCwd);
+        break;
+      case "report_token_usage":
+        result = await handleReportTokenUsage(toolParams, serverCwd);
         break;
       default:
         error(id, -32601, `unknown tool: ${toolName}`);

@@ -1,5 +1,6 @@
 import type { Contract, ContractTrigger, Verifier } from "./types.js";
 
+
 const CHECKBOX_RE = /^(\s*)-\s+\[([ xX])\]\s+(.*)$/;
 const SUB_BULLET_RE = /^(\s+)-\s+([a-zA-Z][\w-]*)\s*:\s*(.*)$/;
 
@@ -55,6 +56,9 @@ export function parseTodo(source: string): Contract[] {
       retries: fields.retries ? parseInt(fields.retries, 10) : undefined,
       budget: fields.budget ? parseBudget(fields.budget) : undefined,
       trigger: buildTrigger(fields),
+      provider: buildProvider(fields),
+      role: buildRole(fields),
+      mcpServers: buildMcpServers(fields),
       line: i,
       rawLines,
     });
@@ -102,6 +106,25 @@ function buildTrigger(fields: Record<string, string>): ContractTrigger | undefin
   }
 
   return undefined;
+}
+
+function buildProvider(fields: Record<string, string>): Contract["provider"] {
+  const v = fields["provider"]?.trim().toLowerCase();
+  if (v === "opus" || v === "sonnet" || v === "haiku") return v;
+  return undefined;
+}
+
+function buildRole(fields: Record<string, string>): Contract["role"] {
+  const v = fields["role"]?.trim().toLowerCase();
+  if (v === "coordinator" || v === "worker" || v === "linter") return v;
+  return undefined;
+}
+
+function buildMcpServers(fields: Record<string, string>): string[] | undefined {
+  const v = fields["mcp"]?.trim();
+  if (!v) return undefined;
+  const servers = v.split(",").map((s) => s.trim()).filter(Boolean);
+  return servers.length > 0 ? servers : undefined;
 }
 
 function stripBackticks(s: string): string {
