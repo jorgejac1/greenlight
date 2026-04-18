@@ -143,6 +143,59 @@ export interface AgentMessage {
 }
 
 // ---------------------------------------------------------------------------
+// Swarm types (v0.9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Lifecycle state of a single worker process inside a swarm run.
+ *
+ * State machine:
+ *   pending → spawning → running → verifying → merging → done
+ *                                                       → failed
+ */
+export type WorkerStatus =
+	| "pending"
+	| "spawning"
+	| "running"
+	| "verifying"
+	| "merging"
+	| "done"
+	| "failed";
+
+/** Persisted record for one agent worker managed by the swarm orchestrator. */
+export interface WorkerState {
+	/** Short unique id for this worker run. */
+	id: string;
+	/** The contract this worker is fulfilling. */
+	contractId: string;
+	contractTitle: string;
+	/** Absolute path to the git worktree for this worker. */
+	worktreePath: string;
+	/** Git branch created for this worker. */
+	branch: string;
+	/** OS pid of the agent process (set while running). */
+	pid?: number;
+	status: WorkerStatus;
+	startedAt?: string; // ISO 8601
+	finishedAt?: string; // ISO 8601
+	/** Exit code from the agent process. */
+	agentExitCode?: number;
+	/** Whether the evalgate verifier passed in the worktree. */
+	verifierPassed?: boolean;
+	/** Absolute path to the agent session log file. */
+	logPath: string;
+}
+
+/** Full swarm run state written atomically to .evalgate/swarm-state.json. */
+export interface SwarmState {
+	/** Unique id for this swarm run. */
+	id: string;
+	ts: string; // ISO 8601 — when the swarm was started
+	todoPath: string;
+	workers: WorkerState[];
+}
+
+// ---------------------------------------------------------------------------
 // MCP protocol types (v0.2)
 // ---------------------------------------------------------------------------
 

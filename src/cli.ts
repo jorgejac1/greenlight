@@ -14,6 +14,8 @@ import {
 } from "./memory.js";
 import { listMessages, sendMessage } from "./messages.js";
 import { parseTodo } from "./parser.js";
+import { runSwarm } from "./swarm.js";
+import { loadState } from "./swarm-state.js";
 import type { RunResult } from "./types.js";
 import { runContract } from "./verifier.js";
 import { startWatcher } from "./watcher.js";
@@ -555,6 +557,101 @@ async function cmdMsg(subCmd: string, args: string[], todoPath: string): Promise
 	return 1;
 }
 
+async function cmdSwarm(todoPath: string, args: string[]): Promise<number> {
+	if (!existsSync(todoPath)) {
+		console.error(`${C.red}evalgate: file not found: ${todoPath}${C.reset}`);
+		return 1;
+	}
+
+	const concurrencyArg = args.find((a) => a.startsWith("--concurrency="))?.split("=")[1];
+	const concurrency = concurrencyArg ? parseInt(concurrencyArg, 10) : 3;
+	const resume = args.includes("--resume");
+	const agentCmdArg = args.find((a) => a.startsWith("--agent="))?.split("=")[1];
+
+	// Sub-command: swarm status — print state from last run
+	if (args.includes("status")) {
+		const state = loadState(todoPath);
+		if (!state) {
+			console.log(`${C.dim}no swarm state found — run: evalgate swarm${C.reset}`);
+			return 0;
+		}
+		console.log(
+			`${C.bold}evalgate swarm status${C.reset} ${C.dim}· ${state.id}${C.reset} ${C.dim}(${new Date(state.ts).toLocaleString()})${C.reset}\n`,
+		);
+		for (const w of state.workers) {
+			const statusColor =
+				w.status === "done"
+					? C.green
+					: w.status === "failed"
+						? C.red
+						: w.status === "running" || w.status === "spawning"
+							? C.cyan
+							: C.yellow;
+			const mark =
+				w.status === "done"
+					? `${C.green}✓${C.reset}`
+					: w.status === "failed"
+						? `${C.red}✗${C.reset}`
+						: `${C.yellow}○${C.reset}`;
+			console.log(
+				`${mark} ${C.bold}${w.contractTitle}${C.reset}  ${statusColor}${w.status}${C.reset} ${C.dim}(${w.id})${C.reset}`,
+			);
+			if (w.status === "failed" || w.status === "done") {
+				if (w.startedAt && w.finishedAt) {
+					const ms = new Date(w.finishedAt).getTime() - new Date(w.startedAt).getTime();
+					console.log(`  ${C.dim}duration: ${ms}ms${C.reset}`);
+				}
+				if (w.verifierPassed !== undefined) {
+					console.log(
+						`  ${C.dim}verifier: ${w.verifierPassed ? `${C.green}passed${C.reset}` : `${C.red}failed${C.reset}`}${C.dim}  log: ${w.logPath}${C.reset}`,
+					);
+				}
+			}
+		}
+		return 0;
+	}
+
+	console.log(
+		`${C.bold}evalgate swarm${C.reset} ${C.dim}·${C.reset} ${basename(todoPath)} ${C.dim}· concurrency ${concurrency}${resume ? " · resuming" : ""}${C.reset}\n`,
+	);
+
+	try {
+		const result = await runSwarm({
+			todoPath,
+			concurrency,
+			resume,
+			agentCmd: agentCmdArg,
+		});
+
+		for (const w of result.state.workers) {
+			const mark =
+				w.status === "done"
+					? `${C.green}✓${C.reset}`
+					: w.status === "failed"
+						? `${C.red}✗${C.reset}`
+						: `${C.yellow}○${C.reset}`;
+			const statusLabel =
+				w.status === "done"
+					? `${C.green}done${C.reset}`
+					: w.status === "failed"
+						? `${C.red}failed${C.reset}`
+						: `${C.dim}${w.status}${C.reset}`;
+			console.log(`  ${mark} ${w.contractTitle} ${C.dim}(${w.id})${C.reset} ${statusLabel}`);
+		}
+
+		console.log(
+			`\n${C.bold}Swarm summary:${C.reset} ${C.green}${result.done} merged${C.reset}, ${result.failed > 0 ? C.red : C.dim}${result.failed} failed${C.reset}, ${C.dim}${result.skipped} skipped${C.reset}`,
+		);
+		return result.failed > 0 ? 1 : 0;
+	} catch (err) {
+		console.error(
+			`${C.red}evalgate swarm error:${C.reset}`,
+			err instanceof Error ? err.message : err,
+		);
+		return 1;
+	}
+}
+
 function usage(): void {
 	console.log(
 		`
@@ -577,6 +674,8 @@ ${C.bold}USAGE${C.reset}
   evalgate patterns [path]            Show failure patterns from run history
   evalgate export [path] [--format=json|md]  Export full project snapshot
   evalgate diff <a.json> <b.json> [--format=text|json|md]  Diff two snapshots
+  evalgate swarm  [path] [--concurrency=N] [--resume] [--agent=cmd]
+  evalgate swarm  status [path]       Show swarm worker status
   evalgate help                       Show this message
 
 ${C.bold}CONTRACT FORMAT${C.reset} (todo.md)
@@ -779,6 +878,17 @@ async function main(): Promise<void> {
 			const formatArg = flags.find((a) => a.startsWith("--format="))?.split("=")[1];
 			const format = formatArg === "json" ? "json" : formatArg === "md" ? "md" : "text";
 			exitCode = await cmdDiff(resolve(pathA), resolve(pathB), format);
+			break;
+		}
+		case "swarm": {
+			const flags = args.filter((a) => a.startsWith("--"));
+			const positional = args.filter((a) => !a.startsWith("--"));
+			// "status" sub-command: evalgate swarm status [path]
+			const subCmd = positional[0] === "status" ? "status" : undefined;
+			const pathArg = subCmd === "status" ? positional[1] : positional[0];
+			const todoPath = resolve(pathArg ?? "todo.md");
+			const swarmArgs = subCmd ? ["status", ...flags] : flags;
+			exitCode = await cmdSwarm(todoPath, swarmArgs);
 			break;
 		}
 		case "help":

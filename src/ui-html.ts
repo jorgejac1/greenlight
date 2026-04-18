@@ -114,6 +114,28 @@ body.light .msg-ts{color:#6e7781}
 body.light .msg-payload{color:#57606a}
 .empty{color:#484f58;font-size:12px;padding:10px 0;text-align:center}
 body.light .empty{color:#6e7781}
+/* swarm cockpit */
+#swarm-wrap{grid-column:1/-1}
+.worker{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:6px;border:1px solid #21262d;background:#161b22;margin-bottom:6px;transition:border-color .2s}
+body.light .worker{background:#f6f8fa;border-color:#d0d7de}
+.worker.status-done{border-color:#1c4731}
+.worker.status-failed{border-color:#4d1a1a}
+.worker.status-running,.worker.status-spawning,.worker.status-verifying,.worker.status-merging{border-color:#1f3a5f}
+.worker-icon{font-size:14px;flex-shrink:0}
+.worker-body{flex:1;min-width:0}
+.worker-title{font-size:12px;font-weight:500;color:#e6edf3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.light .worker-title{color:#1f2328}
+.worker-meta{font-size:10px;color:#484f58;margin-top:2px;display:flex;gap:10px;flex-wrap:wrap}
+body.light .worker-meta{color:#6e7781}
+.worker-status{display:inline-block;padding:1px 6px;border-radius:10px;font-size:10px;font-weight:600}
+.worker-status.pending{background:#222;color:#8b949e}
+.worker-status.spawning,.worker-status.running,.worker-status.verifying,.worker-status.merging{background:#1f3a5f;color:#58a6ff}
+.worker-status.done{background:#1c4731;color:#3fb950}
+.worker-status.failed{background:#4d1a1a;color:#f85149}
+.swarm-summary{font-size:11px;color:#8b949e;padding:8px 0 4px;display:flex;gap:16px}
+body.light .swarm-summary{color:#57606a}
+.swarm-summary .ok{color:#3fb950}
+.swarm-summary .fail{color:#f85149}
 </style>
 </head>
 <body>
@@ -144,6 +166,10 @@ body.light .empty{color:#6e7781}
   <section id="messages-wrap" style="grid-column:1/-1">
     <h2>Agent Messages</h2>
     <div id="messages-list"><p class="empty">loading…</p></div>
+  </section>
+  <section id="swarm-wrap" style="grid-column:1/-1">
+    <h2>Swarm Cockpit</h2>
+    <div id="swarm-list"><p class="empty">No active swarm — run: evalgate swarm [path]</p></div>
   </section>
 </main>
 <script>
@@ -352,6 +378,64 @@ function renderMessages(messages) {
 }
 
 // ---------------------------------------------------------------------------
+// Render: Swarm Cockpit
+// ---------------------------------------------------------------------------
+function renderSwarm(state) {
+  var el = document.getElementById('swarm-list');
+  if (!state || !state.workers || state.workers.length === 0) {
+    el.innerHTML = '<p class="empty">No active swarm — run: evalgate swarm [path]</p>'; return;
+  }
+  var icons = {pending:'○',spawning:'⟳',running:'▶',verifying:'⚡',merging:'⇢',done:'✓',failed:'✗'};
+  var done = 0, failed = 0, running = 0;
+  var html = '';
+  for (var i = 0; i < state.workers.length; i++) {
+    var w = state.workers[i];
+    var st = w.status || 'pending';
+    if (st === 'done') done++;
+    else if (st === 'failed') failed++;
+    else if (['spawning','running','verifying','merging'].indexOf(st) !== -1) running++;
+    var icon = icons[st] || '○';
+    var meta = '';
+    if (w.id) meta += '<span>' + escHtml(w.id) + '</span>';
+    if (w.branch) meta += '<span>' + escHtml(w.branch) + '</span>';
+    if (w.startedAt) meta += '<span>started ' + timeAgo(w.startedAt) + '</span>';
+    if (w.finishedAt) meta += '<span>finished ' + timeAgo(w.finishedAt) + '</span>';
+    if (w.agentExitCode !== undefined && w.agentExitCode !== null) meta += '<span>agent exit ' + w.agentExitCode + '</span>';
+    if (w.verifierPassed !== undefined && w.verifierPassed !== null) meta += '<span>verifier: ' + (w.verifierPassed ? '✓' : '✗') + '</span>';
+    html += '<div class="worker status-' + escHtml(st) + '">';
+    html += '<span class="worker-icon"><span class="worker-status ' + escHtml(st) + '">' + icon + ' ' + escHtml(st) + '</span></span>';
+    html += '<div class="worker-body"><div class="worker-title">' + escHtml(w.contractTitle || w.contractId) + '</div>';
+    if (meta) html += '<div class="worker-meta">' + meta + '</div>';
+    html += '</div></div>';
+  }
+  var pending = state.workers.length - done - failed - running;
+  html += '<div class="swarm-summary">';
+  html += '<span class="ok">&#10003; ' + done + ' done</span>';
+  html += '<span class="fail">&#10007; ' + failed + ' failed</span>';
+  html += '<span style="color:#58a6ff">&#9654; ' + running + ' active</span>';
+  if (pending > 0) html += '<span class="dim">&#9675; ' + pending + ' pending</span>';
+  html += '<span class="dim" style="margin-left:auto">' + escHtml(state.id || '') + '</span>';
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+// ---------------------------------------------------------------------------
+// Swarm SSE connection
+// ---------------------------------------------------------------------------
+var swarmEs = null;
+function connectSwarm() {
+  if (swarmEs) { try { swarmEs.close(); } catch(e){} }
+  swarmEs = new EventSource('/api/swarm-events');
+  swarmEs.onmessage = function(e) {
+    try {
+      var d = JSON.parse(e.data);
+      if (d.type === 'swarm') renderSwarm(d.state);
+    } catch(ex) {}
+  };
+  swarmEs.onerror = function() { setTimeout(connectSwarm, 5000); };
+}
+
+// ---------------------------------------------------------------------------
 // Fetch state + render all sections
 // ---------------------------------------------------------------------------
 async function fetchState() {
@@ -369,10 +453,21 @@ async function fetchState() {
   }
 }
 
+async function fetchSwarmState() {
+  try {
+    var r = await fetch('/api/swarm-state');
+    var s = await r.json();
+    renderSwarm(s);
+  } catch(e) {}
+}
+
 connect();
+connectSwarm();
 fetchState();
+fetchSwarmState();
 // Also poll every 10s as fallback
 setInterval(fetchState, 10000);
+setInterval(fetchSwarmState, 10000);
 </script>
 </body>
 </html>`;
