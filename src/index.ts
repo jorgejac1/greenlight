@@ -23,6 +23,7 @@ export {
 	suggest,
 } from "./memory.js";
 export { listMessages, sendMessage } from "./messages.js";
+export * as telegram from "./telegram.js";
 export { parseTodo } from "./parser.js";
 export type { SpawnOpts } from "./spawn.js";
 export { spawnAgent } from "./spawn.js";
