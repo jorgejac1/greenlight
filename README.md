@@ -5,7 +5,7 @@
 
 [![MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![Node 18+](https://img.shields.io/badge/node-18%2B-blue.svg)](#)
-[![v0.8.0](https://img.shields.io/badge/version-v0.8.0-brightgreen.svg)](#roadmap)
+[![v0.10.0](https://img.shields.io/badge/version-v0.10.0-brightgreen.svg)](#roadmap)
 
 ---
 
@@ -101,15 +101,17 @@ Contracts live in any markdown file (convention: `todo.md`). A contract is a GFM
 task-list item with indented sub-bullet fields:
 
 ```markdown
-- [ ] Refactor auth middleware to use JWT
-  - eval: `pnpm test src/auth && pnpm lint src/auth`
+- [ ] Task title
+  - eval: `shell command`
+  - eval.all: `cmd1` | `cmd2`
+  - eval.any: `cmd1` | `cmd2`
+  - eval.llm: judge prompt as plain text
   - retries: 3
   - budget: 50k
-  - id: auth-jwt-refactor
-  - provider: sonnet
-  - role: worker
-  - mcp: supabase, filesystem
-  - on: schedule: "0 */6 * * *"
+  - id: stable-slug
+  - on: schedule: "0 * * * *"
+  - on: watch: "src/**/*.ts"
+  - on: webhook: "/deploy-done"
 ```
 
 ### Field reference
@@ -192,43 +194,94 @@ Requires `ANTHROPIC_API_KEY`. Defaults to `claude-haiku-4-5-20251001`.
 | `evalgate suggest "<title>" [path]` | Find similar past completions for a new contract. |
 | `evalgate patterns [path]` | Analyse failure patterns across all contracts. |
 | `evalgate export [path] [--format=json\|md]` | Export full project snapshot. |
-| `evalgate diff <snap1.json> <snap2.json> [--format=text\|json\|md]` | Compare two snapshots — show what changed between exports. |
+| `evalgate diff <snap1.json> <snap2.json> [--format=text\|json\|md]` | Compare two snapshots. |
+| `evalgate swarm [path] [--concurrency=N] [--resume] [--agent=cmd]` | Spawn parallel agent workers. |
+| `evalgate swarm status [path]` | Show last swarm run status. |
 
 ---
 
-## Claude Code integration
+## Swarm Cockpit
 
-Wire the provided `PostToolUse` hook to auto-check `todo.md` whenever Claude Code
-edits it:
+`evalgate swarm` spawns parallel agent workers — one per pending contract — each in
+its own git worktree. Workers implement their contract independently, then `evalgate`
+runs the verifier in the worktree. Only workers whose verifier passes get merged back.
 
 ```bash
-chmod +x hooks/claude-code-posttooluse.sh
+# Run swarm with up to 3 parallel workers (default)
+evalgate swarm todo.md
+
+# Custom concurrency
+evalgate swarm todo.md --concurrency=5
+
+# Resume a previous run (skip already-done workers)
+evalgate swarm todo.md --resume
+
+# Use a custom agent command
+evalgate swarm todo.md --agent="claude --model opus"
 ```
 
-Add to `~/.claude/settings.json` (or `.claude/settings.json` in your repo):
+Output during a swarm run:
 
-```json
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          { "type": "command", "command": "/abs/path/to/hooks/claude-code-posttooluse.sh" }
-        ]
-      }
-    ]
-  }
-}
+```
+evalgate swarm · todo.md · concurrency 3
+
+  ✓ Implement add(a, b) (implement-add) done
+  ✗ Implement subtract(a, b) (implement-subtract) failed
+  ✓ Add TypeScript types (add-typescript-types) done
+
+Swarm summary: 2 merged, 1 failed, 0 skipped
 ```
 
-Now whenever Claude Code edits `todo.md`, `evalgate check` runs automatically.
-If a verifier fails, the hook exits `2` and Claude Code feeds the failure output
-back into the agent's next turn.
+### Checking swarm status
+
+After a run, inspect each worker's outcome:
+
+```bash
+evalgate swarm status todo.md
+```
+
+```
+evalgate swarm status · swarm-a1b2c3d4 (2024-01-15 10:32:00)
+
+✓ Implement add(a, b)  done (implement-add)
+  duration: 8420ms
+  verifier: passed  log: .evalgate/swarm/logs/implement-add.log
+
+✗ Implement subtract(a, b)  failed (implement-subtract)
+  duration: 12300ms
+  verifier: failed  log: .evalgate/swarm/logs/implement-subtract.log
+```
+
+### Retrying a failed worker
+
+```bash
+# Retry a single failed contract (shows last failure output first)
+evalgate retry implement-subtract todo.md
+```
+
+The retry command pulls the last failure output from the durable run log and
+displays it before re-running the verifier, giving the agent concrete context
+to fix the root cause.
 
 ---
 
-## MCP integration
+## Web UI
+
+```bash
+# Browser dashboard at localhost:7777
+evalgate ui todo.md
+
+# Custom port
+evalgate ui todo.md --port=8080
+```
+
+The web UI shows live contract status (auto-refreshing via SSE), run history,
+failure output per contract, and budget gauges. It serves from Node's built-in
+`http` module — no framework, no external dependencies.
+
+---
+
+## MCP server
 
 `evalgate serve` exposes 15 tools over stdio MCP. Any MCP client (Claude Desktop,
 Cursor, Windsurf) can invoke contracts as tools without touching the CLI.
@@ -267,6 +320,38 @@ In `~/Library/Application Support/Claude/claude_desktop_config.json`:
 | `suggest_template` | Find similar past completions for a new task. |
 | `get_patterns` | Failure pattern analysis across all contracts. |
 | `export_state` | Full project snapshot as JSON or markdown. |
+
+---
+
+## Claude Code integration
+
+Wire the provided `PostToolUse` hook to auto-check `todo.md` whenever Claude Code
+edits it:
+
+```bash
+chmod +x hooks/claude-code-posttooluse.sh
+```
+
+Add to `~/.claude/settings.json` (or `.claude/settings.json` in your repo):
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          { "type": "command", "command": "/abs/path/to/hooks/claude-code-posttooluse.sh" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Now whenever Claude Code edits `todo.md`, `evalgate check` runs automatically.
+If a verifier fails, the hook exits `2` and Claude Code feeds the failure output
+back into the agent's next turn.
 
 ---
 
@@ -347,22 +432,15 @@ The `report_token_usage` MCP tool lets agents self-report without shelling out.
 
 ---
 
-## Web UI and terminal dashboard
+## Terminal dashboard
 
 ```bash
-# Browser dashboard at localhost:7777
-evalgate ui
-
-# Custom port
-evalgate ui --port=8080
-
 # ANSI live dashboard in the terminal
-evalgate dash
+evalgate dash todo.md
 ```
 
-The web UI shows live contract status, run history, failure output, and budget gauges.
 The ANSI dashboard is useful inside tmux or when you want a heads-up display without
-leaving the terminal.
+leaving the terminal. It refreshes on every run event via the durable log.
 
 ---
 
@@ -394,9 +472,11 @@ All state lives in `.evalgate/` at the project root:
 
 ```
 .evalgate/
-  runs.ndjson       — full run history (contract id, exit code, output, duration)
-  messages.ndjson   — agent message log
-  budget.ndjson     — token spend per contract
+  runs.ndjson           — full run history (contract id, exit code, output, duration)
+  messages.ndjson       — agent message log
+  budget.ndjson         — token spend per contract
+  swarm-state.json      — last swarm run state
+  swarm/logs/           — per-worker agent session logs
 ```
 
 NDJSON format — human-readable, grep-friendly, no database required.
@@ -465,8 +545,6 @@ evalgate check todo.md || echo "Contracts failed — review before merging."
 
 ## Roadmap
 
-All v0.1 through v0.8 milestones have shipped.
-
 | Version | Feature | Status |
 | ------- | ------- | ------ |
 | v0.1 | Parser, shell verifier, CLI (`check`, `list`), Claude Code hook | Shipped |
@@ -476,13 +554,14 @@ All v0.1 through v0.8 milestones have shipped.
 | v0.5 | Web UI (`evalgate ui`), ANSI dashboard (`evalgate dash`) | Shipped |
 | v0.6 | Budget tracking, provider/role hints, MCP-scoped contracts | Shipped |
 | v0.7 | Memory/learning (`suggest`, `patterns`), `export`, failure analysis | Shipped |
-| v0.8 | Composite verifiers (`eval.all`, `eval.any`), LLM-judge (`eval.llm`), `diff`, GitHub Actions CI, Biome linter, pre-commit hook | Shipped |
+| v0.8 | Composite verifiers (`eval.all`, `eval.any`), LLM-judge (`eval.llm`), `diff`, GitHub Actions CI, Biome linter | Shipped |
+| v0.9 | Swarm orchestrator — parallel workers, git worktrees, verifier-gated merge | Shipped |
+| v0.10 | `evalgate retry` with failure-context injection, Telegram gateway (planned) | Shipped |
 
 **Up next:**
 - `--watch` mode for continuous re-checking on file save
 - Semantic-diff verifier kind (assert structural changes, not just exit codes)
 - MCP per-contract server scoping (whitelist which servers each worker can reach)
-- `evalgate retry <id>` with automatic failure-context injection
 - Vector-indexed template memory for smarter `suggest` results
 
 ---
@@ -517,7 +596,7 @@ The parser is the most critical file; edge cases matter more than features.
 ```bash
 pnpm install       # install dev deps (typescript, tsx, biome)
 pnpm build         # compile TypeScript → dist/
-pnpm test          # run all unit tests (67 tests)
+pnpm test          # run all unit tests
 pnpm typecheck     # TypeScript strict check, no emit
 pnpm lint          # biome lint check (src/ and test/)
 pnpm lint:fix      # auto-fix lint issues

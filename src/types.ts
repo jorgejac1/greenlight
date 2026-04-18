@@ -231,3 +231,26 @@ export interface McpServerInfo {
 export interface McpCapabilities {
 	tools?: Record<string, never>;
 }
+
+// ---------------------------------------------------------------------------
+// Gateway types (v0.10)
+// ---------------------------------------------------------------------------
+
+export interface GatewayConfig {
+	token: string;
+	chatId: number;
+	todoPath: string;
+	concurrency?: number;
+}
+
+export interface TelegramUpdate {
+	update_id: number;
+	message?: TelegramMessage;
+}
+
+export interface TelegramMessage {
+	message_id: number;
+	chat: { id: number };
+	text?: string;
+	date: number;
+}

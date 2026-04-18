@@ -2,6 +2,8 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { getBudgetSummary, getTotalTokens, reportTokenUsage } from "./budget.js";
+import { runGateway } from "./gateway.js";
+import { loadConfig, setupConfig } from "./gateway-config.js";
 import { getLastFailure, queryRuns } from "./log.js";
 import { startMcpServer } from "./mcp.js";
 import {
@@ -14,7 +16,7 @@ import {
 } from "./memory.js";
 import { listMessages, sendMessage } from "./messages.js";
 import { parseTodo } from "./parser.js";
-import { runSwarm } from "./swarm.js";
+import { retryWorker, runSwarm } from "./swarm.js";
 import { loadState } from "./swarm-state.js";
 import type { RunResult } from "./types.js";
 import { runContract } from "./verifier.js";
@@ -568,6 +570,46 @@ async function cmdSwarm(todoPath: string, args: string[]): Promise<number> {
 	const resume = args.includes("--resume");
 	const agentCmdArg = args.find((a) => a.startsWith("--agent="))?.split("=")[1];
 
+	// Sub-command: swarm retry <worker-id> — retry a single failed worker
+	if (args.includes("retry")) {
+		const retryIdx = args.indexOf("retry");
+		// Worker id is the first positional argument after "retry"
+		const workerId = args.slice(retryIdx + 1).find((a) => !a.startsWith("--"));
+		if (!workerId) {
+			console.error(`${C.red}evalgate swarm retry: missing worker id${C.reset}`);
+			console.error(`  usage: evalgate swarm retry <worker-id> [todo-path]`);
+			return 1;
+		}
+		console.log(
+			`${C.bold}evalgate swarm retry${C.reset} ${C.dim}·${C.reset} worker ${C.cyan}${workerId}${C.reset}\n`,
+		);
+		try {
+			const worker = await retryWorker(workerId, todoPath, {
+				todoPath,
+				agentCmd: agentCmdArg,
+			});
+			if (worker.status === "done") {
+				console.log(
+					`${C.green}✓${C.reset} ${worker.contractTitle} ${C.dim}(${worker.id})${C.reset} ${C.green}done${C.reset}`,
+				);
+				return 0;
+			}
+			console.log(
+				`${C.red}✗${C.reset} ${worker.contractTitle} ${C.dim}(${worker.id})${C.reset} ${C.red}failed${C.reset}`,
+			);
+			if (worker.logPath) {
+				console.log(`  ${C.dim}log: ${worker.logPath}${C.reset}`);
+			}
+			return 1;
+		} catch (err) {
+			console.error(
+				`${C.red}evalgate swarm retry error:${C.reset}`,
+				err instanceof Error ? err.message : err,
+			);
+			return 1;
+		}
+	}
+
 	// Sub-command: swarm status — print state from last run
 	if (args.includes("status")) {
 		const state = loadState(todoPath);
@@ -652,6 +694,79 @@ async function cmdSwarm(todoPath: string, args: string[]): Promise<number> {
 	}
 }
 
+async function cmdGatewaySetup(): Promise<number> {
+	try {
+		const config = await setupConfig();
+		const { configPath } = await import("./gateway-config.js");
+		console.log(`\n${C.green}Config saved to ${configPath()}${C.reset}`);
+		console.log(`${C.dim}token: ${config.token.slice(0, 8)}…${C.reset}`);
+		console.log(`${C.dim}chatId: ${config.chatId}${C.reset}`);
+		console.log(`${C.dim}todoPath: ${config.todoPath}${C.reset}`);
+		console.log(`\nRun ${C.bold}evalgate gateway${C.reset} to start the bot.`);
+		return 0;
+	} catch (err) {
+		console.error(
+			`${C.red}gateway setup failed:${C.reset}`,
+			err instanceof Error ? err.message : err,
+		);
+		return 1;
+	}
+}
+
+async function cmdGateway(args: string[]): Promise<number> {
+	const tokenArg = args.find((a) => a.startsWith("--token="))?.split("=")[1];
+	const chatIdArg = args.find((a) => a.startsWith("--chat-id="))?.split("=")[1];
+	const todoArg = args.find((a) => a.startsWith("--todo="))?.split("=")[1];
+	const concurrencyArg = args.find((a) => a.startsWith("--concurrency="))?.split("=")[1];
+
+	const stored = loadConfig();
+
+	const token = tokenArg ?? stored?.token;
+	const chatId = chatIdArg ? parseInt(chatIdArg, 10) : stored?.chatId;
+	const todoPath = todoArg ?? stored?.todoPath ?? "todo.md";
+	const concurrency = concurrencyArg ? parseInt(concurrencyArg, 10) : (stored?.concurrency ?? 3);
+
+	if (!token) {
+		console.error(
+			`${C.red}evalgate gateway: no token found.${C.reset}\n` +
+				`  Run ${C.bold}evalgate gateway setup${C.reset} first, ` +
+				`or pass ${C.cyan}--token=<token>${C.reset}`,
+		);
+		return 1;
+	}
+
+	if (chatId === undefined || Number.isNaN(chatId)) {
+		console.error(
+			`${C.red}evalgate gateway: no chat ID found.${C.reset}\n` +
+				`  Run ${C.bold}evalgate gateway setup${C.reset} first, ` +
+				`or pass ${C.cyan}--chat-id=<id>${C.reset}`,
+		);
+		return 1;
+	}
+
+	console.log(`${C.bold}evalgate gateway${C.reset} ${C.dim}· Telegram bot starting…${C.reset}`);
+	console.log(`${C.dim}todo: ${todoPath} · concurrency: ${concurrency}${C.reset}`);
+	console.log(`${C.dim}Press Ctrl+C to stop.${C.reset}\n`);
+
+	process.on("SIGINT", () => process.exit(0));
+	process.on("SIGTERM", () => process.exit(0));
+
+	try {
+		await runGateway({
+			config: { token, chatId, todoPath, concurrency },
+			todoPath,
+		});
+	} catch (err) {
+		console.error(
+			`${C.red}evalgate gateway error:${C.reset}`,
+			err instanceof Error ? err.message : err,
+		);
+		return 1;
+	}
+
+	return 0;
+}
+
 function usage(): void {
 	console.log(
 		`
@@ -676,6 +791,9 @@ ${C.bold}USAGE${C.reset}
   evalgate diff <a.json> <b.json> [--format=text|json|md]  Diff two snapshots
   evalgate swarm  [path] [--concurrency=N] [--resume] [--agent=cmd]
   evalgate swarm  status [path]       Show swarm worker status
+  evalgate swarm  retry <id> [path]   Retry a single failed swarm worker
+  evalgate gateway setup              Configure Telegram bot token and chat ID
+  evalgate gateway [--todo=path]      Start Telegram bot gateway
   evalgate help                       Show this message
 
 ${C.bold}CONTRACT FORMAT${C.reset} (todo.md)
@@ -889,6 +1007,15 @@ async function main(): Promise<void> {
 			const todoPath = resolve(pathArg ?? "todo.md");
 			const swarmArgs = subCmd ? ["status", ...flags] : flags;
 			exitCode = await cmdSwarm(todoPath, swarmArgs);
+			break;
+		}
+		case "gateway": {
+			const subCmd = args[0];
+			if (subCmd === "setup") {
+				exitCode = await cmdGatewaySetup();
+			} else {
+				exitCode = await cmdGateway(args);
+			}
 			break;
 		}
 		case "help":

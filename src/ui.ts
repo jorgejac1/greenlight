@@ -4,20 +4,22 @@
  * Serves a single-page dashboard over node:http. Zero runtime deps.
  *
  * Routes:
- *   GET /          → full HTML dashboard
- *   GET /api/state → JSON snapshot (contracts, runs, messages)
- *   GET /api/stream → SSE stream; pushes {"type":"run"} events on each run
+ *   GET /                  → full HTML dashboard
+ *   GET /api/state         → JSON snapshot (contracts, runs, messages)
+ *   GET /api/stream        → SSE stream; pushes {"type":"run"} events on each run
+ *   POST /api/swarm/retry  → retry a failed swarm worker by id
+ *   GET /api/gateway-status → is the Telegram gateway running (checks PID file)
  */
 
 import { existsSync, readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { getBudgetSummary } from "./budget.js";
 import { onRun, queryRuns } from "./log.js";
 import { detectPatterns } from "./memory.js";
 import { listMessages } from "./messages.js";
 import { parseTodo } from "./parser.js";
-import { swarmEvents } from "./swarm.js";
+import { retryWorker, swarmEvents } from "./swarm.js";
 import { loadState } from "./swarm-state.js";
 import type { RunRecord, SwarmState } from "./types.js";
 import { htmlDashboard } from "./ui-html.js";
@@ -161,6 +163,72 @@ export function startUiServer(opts: UiServerOptions): UiServerHandle {
 				clearInterval(keepalive);
 				swarmClients.delete(res);
 			});
+			return;
+		}
+
+		// POST /api/swarm/retry — retry a failed swarm worker
+		// Body: { workerId: string, todoPath?: string }
+		if (url === "/api/swarm/retry" && req.method === "POST") {
+			const chunks: Buffer[] = [];
+			req.on("data", (chunk: Buffer) => chunks.push(chunk));
+			req.on("end", () => {
+				let body: { workerId?: unknown; todoPath?: unknown };
+				try {
+					body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+						workerId?: unknown;
+						todoPath?: unknown;
+					};
+				} catch {
+					res.writeHead(400, { "Content-Type": "application/json" });
+					res.end(JSON.stringify({ error: "invalid JSON body" }));
+					return;
+				}
+
+				const workerId = typeof body.workerId === "string" ? body.workerId : "";
+				const targetPath =
+					typeof body.todoPath === "string" && body.todoPath ? body.todoPath : todoPath;
+
+				if (!workerId) {
+					res.writeHead(400, { "Content-Type": "application/json" });
+					res.end(JSON.stringify({ error: "workerId is required" }));
+					return;
+				}
+
+				// Run the retry asynchronously and stream back the result as JSON.
+				retryWorker(workerId, targetPath, { todoPath: targetPath })
+					.then((worker) => {
+						res.writeHead(200, { "Content-Type": "application/json" });
+						res.end(JSON.stringify({ worker }));
+					})
+					.catch((err: unknown) => {
+						const message = err instanceof Error ? err.message : String(err);
+						res.writeHead(500, { "Content-Type": "application/json" });
+						res.end(JSON.stringify({ error: message }));
+					});
+			});
+			return;
+		}
+
+		// GET /api/gateway-status — checks for a recent gateway.pid file
+		if (url === "/api/gateway-status") {
+			const pidPath = join(dirname(todoPath), ".evalgate", "gateway.pid");
+			let running = false;
+			let lastPing: string | null = null;
+
+			if (existsSync(pidPath)) {
+				try {
+					const raw = readFileSync(pidPath, "utf8");
+					const parsed = JSON.parse(raw) as { pid: number; ts: string };
+					lastPing = parsed.ts;
+					const ageMs = Date.now() - new Date(parsed.ts).getTime();
+					running = ageMs < 60_000;
+				} catch {
+					// malformed pid file — treat as offline
+				}
+			}
+
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end(JSON.stringify({ running, lastPing }));
 			return;
 		}
 

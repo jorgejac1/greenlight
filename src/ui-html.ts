@@ -136,6 +136,12 @@ body.light .worker-meta{color:#6e7781}
 body.light .swarm-summary{color:#57606a}
 .swarm-summary .ok{color:#3fb950}
 .swarm-summary .fail{color:#f85149}
+.retry-btn{background:none;border:1px solid #4d1a1a;border-radius:6px;color:#f85149;cursor:pointer;font-family:inherit;font-size:10px;font-weight:600;padding:2px 8px;transition:border-color .2s,color .2s,opacity .2s;flex-shrink:0}
+.retry-btn:hover:not(:disabled){border-color:#f85149;color:#ff7b72}
+.retry-btn:disabled{opacity:.4;cursor:not-allowed}
+#gateway-pill{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;background:#21262d;color:#8b949e;transition:background .3s,color .3s}
+#gateway-pill.online{background:#1c4731;color:#3fb950}
+#gateway-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
 </style>
 </head>
 <body>
@@ -144,6 +150,7 @@ body.light .swarm-summary{color:#57606a}
   <h1>evalgate</h1>
   <span id="status">connecting…</span>
   <span id="file-label"></span>
+  <span id="gateway-pill" title="Telegram gateway status"><span id="gateway-dot"></span><span id="gateway-label">gateway: offline</span></span>
   <button id="theme-btn" onclick="toggleTheme()" title="Toggle theme">&#9788;</button>
 </header>
 <main>
@@ -406,7 +413,11 @@ function renderSwarm(state) {
     html += '<span class="worker-icon"><span class="worker-status ' + escHtml(st) + '">' + icon + ' ' + escHtml(st) + '</span></span>';
     html += '<div class="worker-body"><div class="worker-title">' + escHtml(w.contractTitle || w.contractId) + '</div>';
     if (meta) html += '<div class="worker-meta">' + meta + '</div>';
-    html += '</div></div>';
+    html += '</div>';
+    if (st === 'failed' && w.id) {
+      html += '<button class="retry-btn" data-worker-id="' + escHtml(w.id) + '" onclick="retrySwarmWorker(this)" title="Retry this worker">&#8635; Retry</button>';
+    }
+    html += '</div>';
   }
   var pending = state.workers.length - done - failed - running;
   html += '<div class="swarm-summary">';
@@ -461,6 +472,36 @@ async function fetchSwarmState() {
   } catch(e) {}
 }
 
+// ---------------------------------------------------------------------------
+// Swarm worker retry
+// ---------------------------------------------------------------------------
+async function retrySwarmWorker(btn) {
+  var workerId = btn.getAttribute('data-worker-id');
+  if (!workerId) return;
+  btn.disabled = true;
+  btn.textContent = '⟳ retrying…';
+  try {
+    var r = await fetch('/api/swarm/retry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workerId: workerId })
+    });
+    var result = await r.json();
+    if (!r.ok) {
+      console.error('retry failed:', result.error);
+      btn.textContent = '✗ error';
+      btn.disabled = false;
+    }
+    // SSE stream will update the card automatically when the worker state changes.
+    // Trigger an immediate swarm state refresh to give quick feedback.
+    fetchSwarmState();
+  } catch(e) {
+    console.error('retry request failed:', e);
+    btn.textContent = '✗ error';
+    btn.disabled = false;
+  }
+}
+
 connect();
 connectSwarm();
 fetchState();
@@ -468,6 +509,22 @@ fetchSwarmState();
 // Also poll every 10s as fallback
 setInterval(fetchState, 10000);
 setInterval(fetchSwarmState, 10000);
+// Gateway status pill
+function updateGatewayPill(running) {
+  var pill = document.getElementById('gateway-pill');
+  var label = document.getElementById('gateway-label');
+  if (!pill || !label) return;
+  pill.className = running ? 'online' : '';
+  label.textContent = running ? 'gateway: online' : 'gateway: offline';
+}
+function fetchGatewayStatus() {
+  fetch('/api/gateway-status')
+    .then(function(r) { return r.json(); })
+    .then(function(data) { updateGatewayPill(data.running); })
+    .catch(function() { updateGatewayPill(false); });
+}
+fetchGatewayStatus();
+setInterval(fetchGatewayStatus, 10000);
 </script>
 </body>
 </html>`;

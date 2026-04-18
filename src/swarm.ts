@@ -19,6 +19,7 @@ import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { parseTodo } from "./parser.js";
 import { spawnAgent } from "./spawn.js";
@@ -103,6 +104,8 @@ async function runWorker(
 	todoPath: string,
 	repoRoot: string,
 	opts: SwarmOptions,
+	/** Optional extra env vars merged into the agent process environment. */
+	extraEnv?: Record<string, string>,
 ): Promise<void> {
 	const now = () => new Date().toISOString();
 
@@ -131,6 +134,7 @@ async function runWorker(
 		logPath: worker.logPath,
 		agentCmd: opts.agentCmd,
 		agentArgs: opts.agentArgs,
+		env: extraEnv,
 	});
 
 	// ── 3. verifying ─────────────────────────────────────────────────────────
@@ -187,6 +191,113 @@ async function runWorker(
 	deleteBranch(repoRoot, worker.branch);
 
 	emitWorker(todoPath, worker.id, "done", { finishedAt: now() });
+}
+
+// ---------------------------------------------------------------------------
+// Retry a single failed worker
+// ---------------------------------------------------------------------------
+
+/**
+ * Retries a failed worker by id.
+ *
+ * Reads the last 100 lines of the worker's log and injects them as failure
+ * context via the `EVALGATE_RETRY_CONTEXT_FILE` environment variable.  The
+ * agent can read that file to understand what went wrong on the previous
+ * attempt.  This is a hint — the retry does not block on the agent reading it.
+ *
+ * Throws if:
+ *  - No swarm state exists for the given todoPath.
+ *  - The worker id is not found in the persisted state.
+ *  - The worker's current status is not "failed" (only failed workers are
+ *    retryable; use --resume for in-flight recovery).
+ *  - The contract for the worker is no longer present in the todo file.
+ */
+export async function retryWorker(
+	workerId: string,
+	todoPath: string,
+	opts: SwarmOptions,
+): Promise<WorkerState> {
+	const resolvedTodoPath = resolvePath(todoPath);
+
+	const state = loadState(resolvedTodoPath);
+	if (!state) {
+		throw new Error(`no swarm state found for: ${resolvedTodoPath}`);
+	}
+
+	const worker = state.workers.find((w) => w.id === workerId);
+	if (!worker) {
+		throw new Error(`worker not found: ${workerId}`);
+	}
+	if (worker.status !== "failed") {
+		throw new Error(
+			`worker ${workerId} is not retryable — status is "${worker.status}" (must be "failed")`,
+		);
+	}
+
+	// Write the last 100 lines of the failure log to a temp file so the agent
+	// can read it via EVALGATE_RETRY_CONTEXT_FILE.
+	const contextFile = join(tmpdir(), `evalgate-retry-context-${workerId}-${Date.now()}.txt`);
+	if (existsSync(worker.logPath)) {
+		const logContent = readFileSync(worker.logPath, "utf8");
+		const lines = logContent.split("\n");
+		const last100 = lines.slice(Math.max(0, lines.length - 100)).join("\n");
+		writeFileSync(
+			contextFile,
+			`# Retry context for worker ${workerId}\n# Previous failure log (last 100 lines):\n\n${last100}\n`,
+		);
+	} else {
+		writeFileSync(
+			contextFile,
+			`# Retry context for worker ${workerId}\n# No previous log found.\n`,
+		);
+	}
+
+	// Clean up leftover worktree and branch from the failed run before retrying.
+	// runWorker keeps them for human inspection after a failure, so we must tidy
+	// them up here to allow createWorktree to succeed with the same branch name.
+	const repoRoot = getRepoRoot(dirname(resolvedTodoPath));
+	removeWorktree(repoRoot, worker.worktreePath);
+	deleteBranch(repoRoot, worker.branch);
+
+	// Reset the worker to pending, clearing transient fields from the failed run.
+	updateWorker(resolvedTodoPath, workerId, {
+		status: "pending",
+		finishedAt: undefined,
+		verifierPassed: undefined,
+		agentExitCode: undefined,
+	});
+
+	// Re-read the reset worker record (updateWorker writes atomically).
+	const freshState = loadState(resolvedTodoPath);
+	const freshWorker = freshState?.workers.find((w) => w.id === workerId);
+	if (!freshWorker) {
+		throw new Error(`worker ${workerId} disappeared from state after reset — this is a bug`);
+	}
+
+	if (!existsSync(resolvedTodoPath)) {
+		throw new Error(`todo file not found: ${resolvedTodoPath}`);
+	}
+	const source = readFileSync(resolvedTodoPath, "utf8");
+	const contracts = parseTodo(source);
+	const contract = contracts.find((c) => c.id === freshWorker.contractId);
+	if (!contract) {
+		throw new Error(
+			`contract "${freshWorker.contractId}" not found in ${resolvedTodoPath} — was the task removed?`,
+		);
+	}
+
+	// Run the full worker lifecycle with the failure context injected via env.
+	await runWorker(freshWorker, contract, resolvedTodoPath, repoRoot, opts, {
+		EVALGATE_RETRY_CONTEXT_FILE: contextFile,
+	});
+
+	// Return the final state from disk (runWorker writes it via emitWorker).
+	const finalState = loadState(resolvedTodoPath);
+	const finalWorker = finalState?.workers.find((w) => w.id === workerId);
+	if (!finalWorker) {
+		throw new Error(`worker ${workerId} missing from state after retry — this is a bug`);
+	}
+	return finalWorker;
 }
 
 // ---------------------------------------------------------------------------

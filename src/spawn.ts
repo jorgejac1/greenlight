@@ -27,6 +27,11 @@ export interface SpawnOpts {
 	agentCmd?: string;
 	/** Full arg list. Defaults to ["--headless", "--print", task]. */
 	agentArgs?: string[];
+	/**
+	 * Additional environment variables to merge into the agent process env.
+	 * Merged on top of process.env — use this for retry context injection.
+	 */
+	env?: Record<string, string>;
 }
 
 /**
@@ -50,6 +55,9 @@ export async function spawnAgent(opts: SpawnOpts): Promise<number> {
 		const child = spawn(cmd, args, {
 			cwd,
 			stdio: ["ignore", "pipe", "pipe"],
+			// Merge caller-supplied env vars on top of the current process env.
+			// When undefined, spawn inherits process.env automatically.
+			env: opts.env ? { ...process.env, ...opts.env } : undefined,
 		});
 
 		// Guard against both 'error' and 'close' firing (which happens on ENOENT).

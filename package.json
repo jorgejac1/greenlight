@@ -1,6 +1,6 @@
 {
   "name": "evalgate",
-  "version": "0.8.0",
+  "version": "0.10.0",
   "description": "Eval-gated todos for agentic coding. Your agents can't tick the checkbox until the verifier passes.",
   "type": "module",
   "bin": {
@@ -34,7 +34,7 @@
     "verifier",
     "coding-agent"
   ],
-  "author": "",
+  "author": "Jorge Jacome",
   "license": "MIT",
   "engines": {
     "node": ">=18"
