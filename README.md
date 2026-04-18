@@ -5,7 +5,7 @@
 
 [![MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![Node 18+](https://img.shields.io/badge/node-18%2B-blue.svg)](#)
-[![v0.10.0](https://img.shields.io/badge/version-v0.10.0-brightgreen.svg)](#roadmap)
+[![v0.10.1](https://img.shields.io/badge/version-v0.10.1-brightgreen.svg)](#roadmap)
 
 ---
 
@@ -80,7 +80,7 @@ npm install -g evalgate
 
 # Or clone + link for development
 git clone https://github.com/jorgejac1/evalgate
-cd greenlight  # repo folder name unchanged
+cd evalgate
 pnpm install && pnpm build && npm link
 ```
 
@@ -556,7 +556,7 @@ evalgate check todo.md || echo "Contracts failed — review before merging."
 | v0.7 | Memory/learning (`suggest`, `patterns`), `export`, failure analysis | Shipped |
 | v0.8 | Composite verifiers (`eval.all`, `eval.any`), LLM-judge (`eval.llm`), `diff`, GitHub Actions CI, Biome linter | Shipped |
 | v0.9 | Swarm orchestrator — parallel workers, git worktrees, verifier-gated merge | Shipped |
-| v0.10 | `evalgate retry` with failure-context injection, Telegram gateway (planned) | Shipped |
+| v0.10 | Export swarm/worktree/spawn APIs for orchestrator consumers, `retryWorker` with failure-context injection | Shipped |
 
 **Up next:**
 - `--watch` mode for continuous re-checking on file save
@@ -568,6 +568,9 @@ evalgate check todo.md || echo "Contracts failed — review before merging."
 
 ## Prior art and positioning
 
+- **[conductor](https://github.com/jorgejac1/conductor)** — multi-agent orchestrator
+  built on top of evalgate. If you want tentacle-scoped parallel workers with a web
+  dashboard and CLI, use conductor. evalgate is its quality gate engine.
 - **Octogent / OpenHarness** — orchestrate multiple Claude Code sessions.
   `evalgate` slots underneath them as the quality-gate layer they're missing.
 - **promptfoo / braintrust** — eval LLM outputs at the prompt level.
@@ -576,11 +579,12 @@ evalgate check todo.md || echo "Contracts failed — review before merging."
   `evalgate` contracts are plain markdown you can read, edit, and version.
 
 ```
-evalgate          ← primitive, no deps, quality gate layer
+conductor           ← orchestrator built on evalgate (tentacles, UI, retry)
+    ↓
+evalgate            ← primitive, no deps, quality gate layer
     ↑
-Octogent            ← orchestrator, Claude Code only
+Octogent            ← orchestrator, Claude Code only, no quality gate
 OpenHarness         ← full harness, multi-provider
-Your 24/7 setup     ← uses Claude Code + evalgate for gates
 ```
 
 ---
