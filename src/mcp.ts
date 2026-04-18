@@ -31,6 +31,14 @@ import { runContract } from "./verifier.js";
 import { updateTodo } from "./writer.js";
 
 // ---------------------------------------------------------------------------
+// Options
+// ---------------------------------------------------------------------------
+
+export interface McpServerOptions {
+	workspaces?: Record<string, string>; // name → absolute path to todo.md
+}
+
+// ---------------------------------------------------------------------------
 // Tool manifest
 // ---------------------------------------------------------------------------
 
@@ -46,6 +54,11 @@ const TOOLS: McpToolDefinition[] = [
 					type: "string",
 					description: "Path to todo.md. Defaults to ./todo.md.",
 				},
+				workspace: {
+					type: "string",
+					description:
+						"Named workspace (alternative to path). Use list_workspaces to see available names.",
+				},
 			},
 		},
 	},
@@ -60,6 +73,11 @@ const TOOLS: McpToolDefinition[] = [
 					type: "string",
 					description: "Path to todo.md. Defaults to ./todo.md.",
 				},
+				workspace: {
+					type: "string",
+					description:
+						"Named workspace (alternative to path). Use list_workspaces to see available names.",
+				},
 			},
 		},
 	},
@@ -72,6 +90,11 @@ const TOOLS: McpToolDefinition[] = [
 				path: {
 					type: "string",
 					description: "Path to todo.md. Defaults to ./todo.md.",
+				},
+				workspace: {
+					type: "string",
+					description:
+						"Named workspace (alternative to path). Use list_workspaces to see available names.",
 				},
 			},
 		},
@@ -91,6 +114,11 @@ const TOOLS: McpToolDefinition[] = [
 					type: "string",
 					description: "Path to todo.md. Defaults to ./todo.md.",
 				},
+				workspace: {
+					type: "string",
+					description:
+						"Named workspace (alternative to path). Use list_workspaces to see available names.",
+				},
 			},
 			required: ["contract_id"],
 		},
@@ -105,6 +133,11 @@ const TOOLS: McpToolDefinition[] = [
 				path: {
 					type: "string",
 					description: "Path to todo.md. Defaults to ./todo.md.",
+				},
+				workspace: {
+					type: "string",
+					description:
+						"Named workspace (alternative to path). Use list_workspaces to see available names.",
 				},
 			},
 		},
@@ -123,6 +156,11 @@ const TOOLS: McpToolDefinition[] = [
 				path: {
 					type: "string",
 					description: "Path to todo.md. Defaults to ./todo.md.",
+				},
+				workspace: {
+					type: "string",
+					description:
+						"Named workspace (alternative to path). Use list_workspaces to see available names.",
 				},
 			},
 			required: ["contract_id"],
@@ -151,6 +189,11 @@ const TOOLS: McpToolDefinition[] = [
 					type: "string",
 					description: "Path to todo.md. Defaults to ./todo.md.",
 				},
+				workspace: {
+					type: "string",
+					description:
+						"Named workspace (alternative to path). Use list_workspaces to see available names.",
+				},
 			},
 		},
 	},
@@ -168,6 +211,11 @@ const TOOLS: McpToolDefinition[] = [
 				path: {
 					type: "string",
 					description: "Path to todo.md. Defaults to ./todo.md.",
+				},
+				workspace: {
+					type: "string",
+					description:
+						"Named workspace (alternative to path). Use list_workspaces to see available names.",
 				},
 			},
 			required: ["contract_id"],
@@ -191,6 +239,11 @@ const TOOLS: McpToolDefinition[] = [
 				contract_id: { type: "string", description: "Optional contract this message relates to." },
 				correlation_id: { type: "string", description: "Optional id to link related messages." },
 				path: { type: "string", description: "Path to todo.md. Defaults to ./todo.md." },
+				workspace: {
+					type: "string",
+					description:
+						"Named workspace (alternative to path). Use list_workspaces to see available names.",
+				},
 			},
 			required: ["from", "to", "kind"],
 		},
@@ -206,6 +259,11 @@ const TOOLS: McpToolDefinition[] = [
 				kind: { type: "string", description: "Filter by message kind." },
 				limit: { type: "number", description: "Max messages to return (default 20)." },
 				path: { type: "string", description: "Path to todo.md. Defaults to ./todo.md." },
+				workspace: {
+					type: "string",
+					description:
+						"Named workspace (alternative to path). Use list_workspaces to see available names.",
+				},
 			},
 		},
 	},
@@ -217,6 +275,11 @@ const TOOLS: McpToolDefinition[] = [
 			type: "object",
 			properties: {
 				path: { type: "string", description: "Path to todo.md. Defaults to ./todo.md." },
+				workspace: {
+					type: "string",
+					description:
+						"Named workspace (alternative to path). Use list_workspaces to see available names.",
+				},
 			},
 		},
 	},
@@ -230,6 +293,11 @@ const TOOLS: McpToolDefinition[] = [
 				query: { type: "string", description: "Task title to find similar completions for." },
 				limit: { type: "number", description: "Max suggestions to return (default 5)." },
 				path: { type: "string", description: "Path to todo.md. Defaults to ./todo.md." },
+				workspace: {
+					type: "string",
+					description:
+						"Named workspace (alternative to path). Use list_workspaces to see available names.",
+				},
 			},
 			required: ["query"],
 		},
@@ -242,6 +310,11 @@ const TOOLS: McpToolDefinition[] = [
 			type: "object",
 			properties: {
 				path: { type: "string", description: "Path to todo.md. Defaults to ./todo.md." },
+				workspace: {
+					type: "string",
+					description:
+						"Named workspace (alternative to path). Use list_workspaces to see available names.",
+				},
 			},
 		},
 	},
@@ -253,6 +326,11 @@ const TOOLS: McpToolDefinition[] = [
 			type: "object",
 			properties: {
 				path: { type: "string", description: "Path to todo.md. Defaults to ./todo.md." },
+				workspace: {
+					type: "string",
+					description:
+						"Named workspace (alternative to path). Use list_workspaces to see available names.",
+				},
 			},
 		},
 	},
@@ -266,9 +344,20 @@ const TOOLS: McpToolDefinition[] = [
 				contract_id: { type: "string", description: "The contract id (slug)." },
 				tokens: { type: "number", description: "Number of tokens used in this session." },
 				path: { type: "string", description: "Path to todo.md. Defaults to ./todo.md." },
+				workspace: {
+					type: "string",
+					description:
+						"Named workspace (alternative to path). Use list_workspaces to see available names.",
+				},
 			},
 			required: ["contract_id", "tokens"],
 		},
+	},
+	{
+		name: "list_workspaces",
+		description:
+			"List all named workspaces configured in this MCP server instance. Each workspace maps a short name to a todo.md path.",
+		inputSchema: { type: "object", properties: {} },
 	},
 ];
 
@@ -276,9 +365,23 @@ const TOOLS: McpToolDefinition[] = [
 // Helpers
 // ---------------------------------------------------------------------------
 
-function resolveTodoPath(raw: unknown, serverCwd: string): string {
-	const p = typeof raw === "string" && raw.trim() ? raw.trim() : "todo.md";
+function resolveTodoPath(
+	params: Params,
+	serverCwd: string,
+	workspaces: Record<string, string>,
+): string {
+	if (typeof params.workspace === "string" && params.workspace.trim()) {
+		const mapped = workspaces[params.workspace.trim()];
+		if (!mapped) throw new Error(`unknown workspace: "${params.workspace}"`);
+		return mapped;
+	}
+	const p = typeof params.path === "string" && params.path.trim() ? params.path.trim() : "todo.md";
 	return resolve(serverCwd, p);
+}
+
+function handleListWorkspaces(workspaces: Record<string, string>): unknown {
+	const entries = Object.entries(workspaces).map(([name, path]) => ({ name, path }));
+	return { count: entries.length, workspaces: entries };
 }
 
 function loadContracts(
@@ -314,8 +417,12 @@ function formatResult(result: RunResult): Record<string, unknown> {
 
 type Params = Record<string, unknown>;
 
-async function handleListTriggers(params: Params, serverCwd: string): Promise<unknown> {
-	const todoPath = resolveTodoPath(params.path, serverCwd);
+async function handleListTriggers(
+	params: Params,
+	serverCwd: string,
+	workspaces: Record<string, string>,
+): Promise<unknown> {
+	const todoPath = resolveTodoPath(params, serverCwd, workspaces);
 	const loaded = loadContracts(todoPath);
 	if ("error" in loaded) return { error: loaded.error };
 
@@ -332,8 +439,12 @@ async function handleListTriggers(params: Params, serverCwd: string): Promise<un
 	};
 }
 
-async function handleListAll(params: Params, serverCwd: string): Promise<unknown> {
-	const todoPath = resolveTodoPath(params.path, serverCwd);
+async function handleListAll(
+	params: Params,
+	serverCwd: string,
+	workspaces: Record<string, string>,
+): Promise<unknown> {
+	const todoPath = resolveTodoPath(params, serverCwd, workspaces);
 	const loaded = loadContracts(todoPath);
 	if ("error" in loaded) return { error: loaded.error };
 
@@ -350,8 +461,12 @@ async function handleListAll(params: Params, serverCwd: string): Promise<unknown
 	};
 }
 
-async function handleListPending(params: Params, serverCwd: string): Promise<unknown> {
-	const todoPath = resolveTodoPath(params.path, serverCwd);
+async function handleListPending(
+	params: Params,
+	serverCwd: string,
+	workspaces: Record<string, string>,
+): Promise<unknown> {
+	const todoPath = resolveTodoPath(params, serverCwd, workspaces);
 	const loaded = loadContracts(todoPath);
 	if ("error" in loaded) return { error: loaded.error };
 
@@ -368,12 +483,16 @@ async function handleListPending(params: Params, serverCwd: string): Promise<unk
 	};
 }
 
-async function handleRunEval(params: Params, serverCwd: string): Promise<unknown> {
+async function handleRunEval(
+	params: Params,
+	serverCwd: string,
+	workspaces: Record<string, string>,
+): Promise<unknown> {
 	const contractId = params.contract_id;
 	if (typeof contractId !== "string" || !contractId.trim()) {
 		return { error: "contract_id is required" };
 	}
-	const todoPath = resolveTodoPath(params.path, serverCwd);
+	const todoPath = resolveTodoPath(params, serverCwd, workspaces);
 	const loaded = loadContracts(todoPath);
 	if ("error" in loaded) return { error: loaded.error };
 
@@ -399,8 +518,12 @@ async function handleRunEval(params: Params, serverCwd: string): Promise<unknown
 	return formatResult(result);
 }
 
-async function handleCheckAll(params: Params, serverCwd: string): Promise<unknown> {
-	const todoPath = resolveTodoPath(params.path, serverCwd);
+async function handleCheckAll(
+	params: Params,
+	serverCwd: string,
+	workspaces: Record<string, string>,
+): Promise<unknown> {
+	const todoPath = resolveTodoPath(params, serverCwd, workspaces);
 	const loaded = loadContracts(todoPath);
 	if ("error" in loaded) return { error: loaded.error };
 
@@ -428,12 +551,16 @@ async function handleCheckAll(params: Params, serverCwd: string): Promise<unknow
 	};
 }
 
-async function handleGetRetryContext(params: Params, serverCwd: string): Promise<unknown> {
+async function handleGetRetryContext(
+	params: Params,
+	serverCwd: string,
+	workspaces: Record<string, string>,
+): Promise<unknown> {
 	const contractId = params.contract_id;
 	if (typeof contractId !== "string" || !contractId.trim()) {
 		return { error: "contract_id is required" };
 	}
-	const todoPath = resolveTodoPath(params.path, serverCwd);
+	const todoPath = resolveTodoPath(params, serverCwd, workspaces);
 	const loaded = loadContracts(todoPath);
 	if ("error" in loaded) return { error: loaded.error };
 
@@ -472,8 +599,12 @@ async function handleGetRetryContext(params: Params, serverCwd: string): Promise
 	};
 }
 
-async function handleGetRunHistory(params: Params, serverCwd: string): Promise<unknown> {
-	const todoPath = resolveTodoPath(params.path, serverCwd);
+async function handleGetRunHistory(
+	params: Params,
+	serverCwd: string,
+	workspaces: Record<string, string>,
+): Promise<unknown> {
+	const todoPath = resolveTodoPath(params, serverCwd, workspaces);
 	const contractId = typeof params.contract_id === "string" ? params.contract_id : undefined;
 	const failedOnly = params.failed_only === true;
 	const limit = typeof params.limit === "number" ? params.limit : 20;
@@ -487,12 +618,16 @@ async function handleGetRunHistory(params: Params, serverCwd: string): Promise<u
 	return { count: records.length, records };
 }
 
-async function handleGetLastFailure(params: Params, serverCwd: string): Promise<unknown> {
+async function handleGetLastFailure(
+	params: Params,
+	serverCwd: string,
+	workspaces: Record<string, string>,
+): Promise<unknown> {
 	const contractId = params.contract_id;
 	if (typeof contractId !== "string" || !contractId.trim()) {
 		return { error: "contract_id is required" };
 	}
-	const todoPath = resolveTodoPath(params.path, serverCwd);
+	const todoPath = resolveTodoPath(params, serverCwd, workspaces);
 	const record = getLastFailure(todoPath, contractId.trim());
 	return record ?? { error: `no failure records found for: ${contractId}` };
 }
@@ -506,7 +641,11 @@ const VALID_MESSAGE_KINDS = new Set([
 	"budget_exceeded",
 ]);
 
-async function handleSendMessage(params: Params, serverCwd: string): Promise<unknown> {
+async function handleSendMessage(
+	params: Params,
+	serverCwd: string,
+	workspaces: Record<string, string>,
+): Promise<unknown> {
 	const from = typeof params.from === "string" ? params.from : undefined;
 	const to = typeof params.to === "string" ? params.to : undefined;
 	const kind = typeof params.kind === "string" ? params.kind : undefined;
@@ -522,7 +661,7 @@ async function handleSendMessage(params: Params, serverCwd: string): Promise<unk
 			error: `invalid kind: "${kind}". Must be one of: ${[...VALID_MESSAGE_KINDS].join(", ")}`,
 		};
 	}
-	const todoPath = resolveTodoPath(params.path, serverCwd);
+	const todoPath = resolveTodoPath(params, serverCwd, workspaces);
 	let payload: unknown = null;
 	if (typeof params.payload === "string") {
 		try {
@@ -544,30 +683,46 @@ async function handleSendMessage(params: Params, serverCwd: string): Promise<unk
 	return msg;
 }
 
-async function handleSuggestTemplate(params: Params, serverCwd: string): Promise<unknown> {
+async function handleSuggestTemplate(
+	params: Params,
+	serverCwd: string,
+	workspaces: Record<string, string>,
+): Promise<unknown> {
 	const query = params.query;
 	if (typeof query !== "string" || !query.trim()) {
 		return { error: "query is required" };
 	}
-	const todoPath = resolveTodoPath(params.path, serverCwd);
+	const todoPath = resolveTodoPath(params, serverCwd, workspaces);
 	const limit = typeof params.limit === "number" ? params.limit : 5;
 	const results = suggest(todoPath, query.trim(), limit);
 	return { query, count: results.length, suggestions: results };
 }
 
-async function handleGetPatterns(params: Params, serverCwd: string): Promise<unknown> {
-	const todoPath = resolveTodoPath(params.path, serverCwd);
+async function handleGetPatterns(
+	params: Params,
+	serverCwd: string,
+	workspaces: Record<string, string>,
+): Promise<unknown> {
+	const todoPath = resolveTodoPath(params, serverCwd, workspaces);
 	const patterns = detectPatterns(todoPath);
 	return { count: patterns.length, patterns };
 }
 
-async function handleExportState(params: Params, serverCwd: string): Promise<unknown> {
-	const todoPath = resolveTodoPath(params.path, serverCwd);
+async function handleExportState(
+	params: Params,
+	serverCwd: string,
+	workspaces: Record<string, string>,
+): Promise<unknown> {
+	const todoPath = resolveTodoPath(params, serverCwd, workspaces);
 	return exportSnapshot(todoPath);
 }
 
-async function handleGetProviderHints(params: Params, serverCwd: string): Promise<unknown> {
-	const todoPath = resolveTodoPath(params.path, serverCwd);
+async function handleGetProviderHints(
+	params: Params,
+	serverCwd: string,
+	workspaces: Record<string, string>,
+): Promise<unknown> {
+	const todoPath = resolveTodoPath(params, serverCwd, workspaces);
 	const loaded = loadContracts(todoPath);
 	if ("error" in loaded) return { error: loaded.error };
 
@@ -593,7 +748,11 @@ async function handleGetProviderHints(params: Params, serverCwd: string): Promis
 	};
 }
 
-async function handleReportTokenUsage(params: Params, serverCwd: string): Promise<unknown> {
+async function handleReportTokenUsage(
+	params: Params,
+	serverCwd: string,
+	workspaces: Record<string, string>,
+): Promise<unknown> {
 	const contractId = params.contract_id;
 	const tokens = params.tokens;
 
@@ -604,7 +763,7 @@ async function handleReportTokenUsage(params: Params, serverCwd: string): Promis
 		return { error: "tokens must be a non-negative number" };
 	}
 
-	const todoPath = resolveTodoPath(params.path, serverCwd);
+	const todoPath = resolveTodoPath(params, serverCwd, workspaces);
 	const loaded = loadContracts(todoPath);
 	if ("error" in loaded) return { error: loaded.error };
 
@@ -620,8 +779,12 @@ async function handleReportTokenUsage(params: Params, serverCwd: string): Promis
 	};
 }
 
-async function handleListMessages(params: Params, serverCwd: string): Promise<unknown> {
-	const todoPath = resolveTodoPath(params.path, serverCwd);
+async function handleListMessages(
+	params: Params,
+	serverCwd: string,
+	workspaces: Record<string, string>,
+): Promise<unknown> {
+	const todoPath = resolveTodoPath(params, serverCwd, workspaces);
 	const to = typeof params.to === "string" ? params.to : undefined;
 	const kind = typeof params.kind === "string" ? params.kind : undefined;
 	const limit = typeof params.limit === "number" ? params.limit : 20;
@@ -646,7 +809,11 @@ function error(id: McpJsonRpcRequest["id"], code: number, message: string): void
 	send({ jsonrpc: "2.0", id, error: { code, message } });
 }
 
-async function dispatch(req: McpJsonRpcRequest, serverCwd: string): Promise<void> {
+async function dispatch(
+	req: McpJsonRpcRequest,
+	serverCwd: string,
+	workspaces: Record<string, string>,
+): Promise<void> {
 	const { id, method, params } = req;
 	const p = (params ?? {}) as Params;
 
@@ -657,7 +824,7 @@ async function dispatch(req: McpJsonRpcRequest, serverCwd: string): Promise<void
 			id,
 			result: {
 				protocolVersion: "2024-11-05",
-				serverInfo: { name: "evalgate", version: "0.2.0" },
+				serverInfo: { name: "evalgate", version: "0.3.0" },
 				capabilities: { tools: {} },
 			},
 		});
@@ -681,49 +848,52 @@ async function dispatch(req: McpJsonRpcRequest, serverCwd: string): Promise<void
 		let result: unknown;
 		switch (toolName) {
 			case "list_triggers":
-				result = await handleListTriggers(toolParams, serverCwd);
+				result = await handleListTriggers(toolParams, serverCwd, workspaces);
 				break;
 			case "list_all":
-				result = await handleListAll(toolParams, serverCwd);
+				result = await handleListAll(toolParams, serverCwd, workspaces);
 				break;
 			case "list_pending":
-				result = await handleListPending(toolParams, serverCwd);
+				result = await handleListPending(toolParams, serverCwd, workspaces);
 				break;
 			case "run_eval":
-				result = await handleRunEval(toolParams, serverCwd);
+				result = await handleRunEval(toolParams, serverCwd, workspaces);
 				break;
 			case "check_all":
-				result = await handleCheckAll(toolParams, serverCwd);
+				result = await handleCheckAll(toolParams, serverCwd, workspaces);
 				break;
 			case "get_retry_context":
-				result = await handleGetRetryContext(toolParams, serverCwd);
+				result = await handleGetRetryContext(toolParams, serverCwd, workspaces);
 				break;
 			case "get_run_history":
-				result = await handleGetRunHistory(toolParams, serverCwd);
+				result = await handleGetRunHistory(toolParams, serverCwd, workspaces);
 				break;
 			case "get_last_failure":
-				result = await handleGetLastFailure(toolParams, serverCwd);
+				result = await handleGetLastFailure(toolParams, serverCwd, workspaces);
 				break;
 			case "send_message":
-				result = await handleSendMessage(toolParams, serverCwd);
+				result = await handleSendMessage(toolParams, serverCwd, workspaces);
 				break;
 			case "list_messages":
-				result = await handleListMessages(toolParams, serverCwd);
+				result = await handleListMessages(toolParams, serverCwd, workspaces);
 				break;
 			case "get_provider_hints":
-				result = await handleGetProviderHints(toolParams, serverCwd);
+				result = await handleGetProviderHints(toolParams, serverCwd, workspaces);
 				break;
 			case "report_token_usage":
-				result = await handleReportTokenUsage(toolParams, serverCwd);
+				result = await handleReportTokenUsage(toolParams, serverCwd, workspaces);
 				break;
 			case "suggest_template":
-				result = await handleSuggestTemplate(toolParams, serverCwd);
+				result = await handleSuggestTemplate(toolParams, serverCwd, workspaces);
 				break;
 			case "get_patterns":
-				result = await handleGetPatterns(toolParams, serverCwd);
+				result = await handleGetPatterns(toolParams, serverCwd, workspaces);
 				break;
 			case "export_state":
-				result = await handleExportState(toolParams, serverCwd);
+				result = await handleExportState(toolParams, serverCwd, workspaces);
+				break;
+			case "list_workspaces":
+				result = handleListWorkspaces(workspaces);
 				break;
 			default:
 				error(id, -32601, `unknown tool: ${toolName}`);
@@ -748,8 +918,14 @@ async function dispatch(req: McpJsonRpcRequest, serverCwd: string): Promise<void
 // Server entrypoint
 // ---------------------------------------------------------------------------
 
-export function startMcpServer(serverCwd: string = process.cwd()): void {
-	process.stderr.write(`[evalgate] MCP server started (cwd: ${serverCwd})\n`);
+export function startMcpServer(
+	serverCwd: string = process.cwd(),
+	options: McpServerOptions = {},
+): void {
+	const workspaces = options.workspaces ?? {};
+	const wsCount = Object.keys(workspaces).length;
+	const wsInfo = wsCount > 0 ? `, ${wsCount} workspace(s)` : "";
+	process.stderr.write(`[evalgate] MCP server started (cwd: ${serverCwd}${wsInfo})\n`);
 
 	const rl = createInterface({ input: process.stdin, terminal: false });
 
@@ -765,7 +941,7 @@ export function startMcpServer(serverCwd: string = process.cwd()): void {
 			return;
 		}
 
-		dispatch(req, serverCwd).catch((err: unknown) => {
+		dispatch(req, serverCwd, workspaces).catch((err: unknown) => {
 			const msg = err instanceof Error ? err.message : String(err);
 			process.stderr.write(`[evalgate] dispatch error: ${msg}\n`);
 			send({ jsonrpc: "2.0", id: req.id ?? null, error: { code: -32603, message: msg } });

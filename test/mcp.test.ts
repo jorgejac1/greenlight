@@ -117,13 +117,13 @@ describe("MCP server — protocol handshake", () => {
 		}
 	});
 
-	it("responds to tools/list with 4 tools", async () => {
+	it("responds to tools/list with all tools", async () => {
 		const dir = makeTmpProject("- [ ] nothing\n");
 		try {
 			const [, resp] = await rpc(dir, [req("initialize"), req("tools/list")]);
 			const result = resp.result as Record<string, unknown>;
 			const tools = result.tools as unknown[];
-			assert.equal(tools.length, 15);
+			assert.equal(tools.length, 16);
 			const names = tools.map((t) => (t as Record<string, unknown>).name);
 			assert.ok(names.includes("list_triggers"));
 			assert.ok(names.includes("list_all"));

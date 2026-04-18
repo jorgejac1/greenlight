@@ -5,7 +5,7 @@
 
 [![MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![Node 18+](https://img.shields.io/badge/node-18%2B-blue.svg)](#)
-[![v0.10.1](https://img.shields.io/badge/version-v0.10.1-brightgreen.svg)](#roadmap)
+[![v0.11.0](https://img.shields.io/badge/version-v0.11.0-brightgreen.svg)](#roadmap)
 
 ---
 
@@ -301,10 +301,46 @@ In `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
+### Named workspaces (v0.11+)
+
+Expose multiple `todo.md` files as named workspaces — each tool accepts an
+optional `workspace` parameter to select which file to operate on:
+
+```json
+{
+  "mcpServers": {
+    "evalgate": {
+      "command": "evalgate",
+      "args": ["serve", "/path/to/project",
+        "--workspace", "auth=/path/to/auth/todo.md",
+        "--workspace", "payments=/path/to/payments/todo.md"
+      ]
+    }
+  }
+}
+```
+
+Or programmatically:
+
+```ts
+import { startMcpServer } from "evalgate";
+
+startMcpServer(process.cwd(), {
+  workspaces: {
+    auth:     "/project/.conductor/tracks/auth/todo.md",
+    payments: "/project/.conductor/tracks/payments/todo.md",
+  },
+});
+```
+
+Call `list_workspaces` from any MCP client to enumerate configured workspaces.
+All 15 tools accept `workspace: "<name>"` to target a specific file.
+
 ### MCP tools
 
 | Tool | Description |
 | ---- | ----------- |
+| `list_workspaces` | List all configured named workspaces. |
 | `list_all` | All contracts with status. |
 | `list_pending` | Contracts not yet passing. |
 | `list_triggers` | Contracts with `on:` triggers and their next fire time. |
@@ -516,6 +552,7 @@ import { suggest, detectPatterns, exportSnapshot, snapshotToMarkdown, diffSnapsh
 
 // Servers
 import { startMcpServer, startUiServer, startWatcher, startDash } from "evalgate";
+import type { McpServerOptions } from "evalgate";
 
 // Cron helpers
 import { parseCron, matchesCron, nextFireMs } from "evalgate";
@@ -557,11 +594,11 @@ evalgate check todo.md || echo "Contracts failed — review before merging."
 | v0.8 | Composite verifiers (`eval.all`, `eval.any`), LLM-judge (`eval.llm`), `diff`, GitHub Actions CI, Biome linter | Shipped |
 | v0.9 | Swarm orchestrator — parallel workers, git worktrees, verifier-gated merge | Shipped |
 | v0.10 | Export swarm/worktree/spawn APIs for orchestrator consumers, `retryWorker` with failure-context injection | Shipped |
+| v0.11 | MCP named workspaces — expose multiple `todo.md` files as a single MCP server with workspace routing | Shipped |
 
 **Up next:**
 - `--watch` mode for continuous re-checking on file save
 - Semantic-diff verifier kind (assert structural changes, not just exit codes)
-- MCP per-contract server scoping (whitelist which servers each worker can reach)
 - Vector-indexed template memory for smarter `suggest` results
 
 ---

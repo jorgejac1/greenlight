@@ -846,8 +846,21 @@ async function main(): Promise<void> {
 			break;
 		}
 		case "serve": {
-			const cwd = args[0] ? resolve(args[0]) : process.cwd();
-			startMcpServer(cwd);
+			const positionalArgs = args.filter((a) => !a.startsWith("--"));
+			const flagArgs = args.filter((a) => a.startsWith("--workspace="));
+			const cwd = positionalArgs[0] ? resolve(positionalArgs[0]) : process.cwd();
+			const workspaces: Record<string, string> = {};
+			for (const flag of flagArgs) {
+				// --workspace=name:/absolute/path/to/todo.md
+				const value = flag.slice("--workspace=".length);
+				const colonIdx = value.indexOf(":");
+				if (colonIdx > 0) {
+					const name = value.slice(0, colonIdx).trim();
+					const wsPath = value.slice(colonIdx + 1).trim();
+					if (name && wsPath) workspaces[name] = wsPath;
+				}
+			}
+			startMcpServer(cwd, { workspaces });
 			// startMcpServer keeps the process alive via readline — don't exit
 			return;
 		}
