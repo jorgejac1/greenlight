@@ -21,7 +21,10 @@
     "prepare": "pnpm build && npx simple-git-hooks",
     "lint": "biome check src/ test/",
     "lint:fix": "biome check --write src/ test/",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "release:patch": "pnpm lint && pnpm typecheck && pnpm test && pnpm version patch && git push origin main --follow-tags",
+    "release:minor": "pnpm lint && pnpm typecheck && pnpm test && pnpm version minor && git push origin main --follow-tags",
+    "release:major": "pnpm lint && pnpm typecheck && pnpm test && pnpm version major && git push origin main --follow-tags"
   },
   "simple-git-hooks": {
     "pre-commit": "pnpm lint && pnpm typecheck"
