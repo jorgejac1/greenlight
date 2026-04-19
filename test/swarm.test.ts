@@ -20,6 +20,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { queryRuns } from "../src/log.js";
 import { runSwarm } from "../src/swarm.js";
 import { loadState, saveState } from "../src/swarm-state.js";
 import type { SwarmState } from "../src/types.js";
@@ -337,6 +338,106 @@ test("runSwarm marks worker failed when worktree creation fails", async () => {
 		assert.equal(result.done, 0);
 		const w = result.state.workers[0];
 		assert.equal(w?.status, "failed");
+	} finally {
+		cleanup(dir);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// appendRun placement tests
+// ---------------------------------------------------------------------------
+
+test("runSwarm writes a FAIL run record when verifier fails", async () => {
+	const dir = makeTmpRepo();
+	try {
+		const todoPath = writeTodo(dir, "- [ ] Failing record task\n  - eval: `false`\n");
+		await runSwarm({
+			todoPath,
+			concurrency: 1,
+			agentCmd: "node",
+			agentArgs: ["-e", "process.exit(0)"],
+		});
+		const records = queryRuns(todoPath, { limit: 100 });
+		assert.equal(records.length, 1, "should have exactly one run record");
+		assert.equal(records[0]?.passed, false, "the run record should be a failure");
+	} finally {
+		cleanup(dir);
+	}
+});
+
+test("runSwarm writes a PASS run record when verifier passes and merge succeeds", async () => {
+	const dir = makeTmpRepo();
+	try {
+		const todoPath = writeTodo(dir, "- [ ] Passing record task\n  - eval: `true`\n");
+		const result = await runSwarm({
+			todoPath,
+			concurrency: 1,
+			agentCmd: "node",
+			agentArgs: ["-e", "process.exit(0)"],
+		});
+		const records = queryRuns(todoPath, { limit: 100 });
+		// Merge can legitimately fail in some CI environments (e.g. git config missing).
+		// If the worker ended up "done", there must be a PASS record.
+		// If the worker ended up "failed" (merge failed), no PASS record should exist.
+		if (result.done === 1) {
+			assert.ok(
+				records.some((r) => r.passed === true),
+				"a PASS run record should exist when merge succeeded",
+			);
+		} else {
+			assert.equal(
+				records.filter((r) => r.passed === true).length,
+				0,
+				"no PASS record should exist when merge failed",
+			);
+		}
+	} finally {
+		cleanup(dir);
+	}
+});
+
+test("runSwarm does not write a PASS record when merge fails after verifier passes", async () => {
+	const dir = makeTmpRepo();
+	try {
+		const todoPath = writeTodo(dir, "- [ ] Merge-sensitive task\n  - eval: `true`\n");
+		const result = await runSwarm({
+			todoPath,
+			concurrency: 1,
+			agentCmd: "node",
+			agentArgs: ["-e", "process.exit(0)"],
+		});
+		const records = queryRuns(todoPath, { limit: 100 });
+		const passCount = records.filter((r) => r.passed === true).length;
+		const expectedPassCount = result.done === 1 ? 1 : 0;
+		assert.equal(
+			passCount,
+			expectedPassCount,
+			`PASS record count (${passCount}) should match done count (${expectedPassCount})`,
+		);
+	} finally {
+		cleanup(dir);
+	}
+});
+
+test("runSwarm writes exactly one run record per failing contract", async () => {
+	const dir = makeTmpRepo();
+	try {
+		const todoPath = writeTodo(
+			dir,
+			"- [ ] Fail contract one\n  - eval: `false`\n- [ ] Fail contract two\n  - eval: `false`\n",
+		);
+		await runSwarm({
+			todoPath,
+			concurrency: 2,
+			agentCmd: "node",
+			agentArgs: ["-e", "process.exit(0)"],
+		});
+		const records = queryRuns(todoPath, { limit: 100 });
+		assert.equal(records.length, 2, "should have exactly two run records");
+		assert.ok(
+			records.every((r) => r.passed === false),
+			"all run records should be failures",
+		);
 	} finally {
 		cleanup(dir);
 	}

@@ -1,4 +1,5 @@
 import type { Contract, ContractTrigger, DiffVerifier, ShellVerifier, Verifier } from "./types.js";
+import { slugify } from "./utils.js";
 
 const CHECKBOX_RE = /^(\s*)-\s+\[([ xX])\]\s+(.*)$/;
 const SUB_BULLET_RE = /^(\s+)-\s+([a-zA-Z][\w.-]*)\s*:\s*(.*)$/;
@@ -164,14 +165,6 @@ function buildMcpServers(fields: Record<string, string>): string[] | undefined {
 function stripBackticks(s: string): string {
 	const m = s.match(/^`(.+)`$/);
 	return m ? m[1] : s;
-}
-
-function slugify(s: string): string {
-	return s
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-+|-+$/g, "")
-		.slice(0, 60);
 }
 
 function parseBudget(s: string): number {

@@ -5,7 +5,7 @@
 
 [![MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![Node 18+](https://img.shields.io/badge/node-18%2B-blue.svg)](#)
-[![v0.13.0](https://img.shields.io/badge/version-v0.13.0-brightgreen.svg)](#roadmap)
+[![v0.14.1](https://img.shields.io/badge/version-v0.14.1-brightgreen.svg)](#roadmap)
 
 ---
 
@@ -106,6 +106,7 @@ task-list item with indented sub-bullet fields:
   - eval.all: `cmd1` | `cmd2`
   - eval.any: `cmd1` | `cmd2`
   - eval.llm: judge prompt as plain text
+  - eval.diff: src/file.ts contains "new pattern"
   - retries: 3
   - budget: 50k
   - id: stable-slug
@@ -122,6 +123,7 @@ task-list item with indented sub-bullet fields:
 | `eval.all`  | yes*     | Pipe-separated commands — **all** must exit 0. |
 | `eval.any`  | yes*     | Pipe-separated commands — **any one** must exit 0. |
 | `eval.llm`  | yes*     | Natural-language prompt judged by Claude. Answers PASS or FAIL. |
+| `eval.diff` | yes*     | Assert a structural change in a file: `contains`, `not contains`, `deleted`, `created`, `changed`. Zero deps. |
 | `retries`   | no       | Max retry attempts hint for orchestrators. |
 | `budget`    | no       | Token budget: `50k`, `1.5m`, or raw integer. |
 | `id`        | no       | Stable slug for references and logs. Defaults to slugified title. |
@@ -159,6 +161,18 @@ task-list item with indented sub-bullet fields:
 ```
 
 Requires `ANTHROPIC_API_KEY`. Defaults to `claude-haiku-4-5-20251001`.
+
+**Semantic diff** — assert that a specific structural change appeared in a file. Passes if the pattern matches the diff; fails if the file is unchanged or the pattern is absent. Zero external dependencies:
+
+```markdown
+- [ ] Add rate-limit header to responses
+  - eval.diff: src/middleware.ts contains "X-RateLimit-Remaining"
+
+- [ ] Remove legacy auth module
+  - eval.diff: src/auth-legacy.ts deleted
+```
+
+Supported assertions: `contains "<text>"`, `not contains "<text>"`, `deleted`, `created`, `changed`.
 
 ### Trigger variants
 
@@ -597,7 +611,7 @@ evalgate check todo.md || echo "Contracts failed — review before merging."
 | v0.11 | MCP named workspaces — expose multiple `todo.md` files as a single MCP server with workspace routing | Shipped |
 | v0.12 | Structured swarm events — `"eval-result"`, `"cost"`, `"task-complete"` typed events on `swarmEvents`; `SwarmEvent` discriminated union exported | Shipped |
 | v0.13 | Re-check watch mode — `evalgate check --watch` re-runs failing contracts on file change; TDD inner loop for agents | Shipped |
-| v0.14 | Semantic-diff verifier — `eval.diff` kind: assert a structural change happened in a file (pattern/hash-based, zero deps) | Planned |
+| v0.14 | Semantic-diff verifier — `eval.diff` kind: assert a structural change happened in a file (pattern/hash-based, zero deps) | Shipped |
 | v1.0 | API stability declaration — stable public surface, migration guide v0.x → v1.0, coordinated with conductor v1.0 | Planned |
 
 ---

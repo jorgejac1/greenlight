@@ -21,6 +21,7 @@ import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve as resolvePath } from "node:path";
+import { appendRun } from "./log.js";
 import { parseTodo } from "./parser.js";
 import { spawnAgent } from "./spawn.js";
 import { loadState, saveState, updateWorker } from "./swarm-state.js";
@@ -32,6 +33,7 @@ import type {
 	WorkerState,
 	WorkerStatus,
 } from "./types.js";
+import { slugify as _slugifyBase } from "./utils.js";
 import { runContract } from "./verifier.js";
 import {
 	createWorktree,
@@ -76,13 +78,8 @@ export interface SwarmResult {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-function slugify(s: string): string {
-	return s
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-|-$/g, "")
-		.slice(0, 40);
-}
+// Git branch names capped at 40 chars for safety
+const slugify = (s: string) => _slugifyBase(s, 40);
 
 function workerLogPath(todoPath: string, workerId: string): string {
 	return join(dirname(todoPath), ".evalgate", "sessions", `${workerId}.log`);
@@ -159,7 +156,7 @@ async function runWorker(
 
 	const result = await runContract(contract, worker.worktreePath, {
 		todoPath: worktreeTodoPath,
-		trigger: "manual",
+		trigger: "swarm",
 	});
 
 	swarmEvents.emit("eval-result", {
@@ -175,6 +172,8 @@ async function runWorker(
 		// Keep the worktree for human inspection.
 		emitWorker(todoPath, worker.id, "failed", { verifierPassed: false, finishedAt: now() });
 		emitTaskComplete(worker.id, contract.id, "failed");
+		// Mirror FAIL to canonical todoPath — eval definitively failed, record it now.
+		appendRun(result, todoPath, "swarm");
 		return;
 	}
 
@@ -220,6 +219,8 @@ async function runWorker(
 
 	emitWorker(todoPath, worker.id, "done", { finishedAt: now() });
 	emitTaskComplete(worker.id, contract.id, "done");
+	// Mirror PASS to canonical todoPath — only after successful merge.
+	appendRun(result, todoPath, "swarm");
 }
 
 // ---------------------------------------------------------------------------

@@ -250,7 +250,7 @@ describe("MCP workspace — workspace param routing", () => {
 });
 
 describe("MCP workspace — server version", () => {
-	it("reports version 0.3.0 in initialize response", async () => {
+	it("reports current package version in initialize response", async () => {
 		const dir = makeTmpProject("- [ ] nothing\n");
 		try {
 			const [resp] = await rpcWithWorkspaces(dir, {}, [
@@ -263,7 +263,9 @@ describe("MCP workspace — server version", () => {
 			assert.ok(resp.result, "expected result");
 			const result = resp.result as Record<string, unknown>;
 			const serverInfo = result.serverInfo as Record<string, unknown>;
-			assert.equal(serverInfo.version, "0.3.0");
+			// Version is now read dynamically from package.json
+			assert.equal(typeof serverInfo.version, "string");
+			assert.ok((serverInfo.version as string).length > 0);
 		} finally {
 			cleanup(dir);
 		}

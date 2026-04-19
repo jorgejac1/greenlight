@@ -130,7 +130,8 @@ export type TriggerSource =
 	| "webhook"
 	| "mcp"
 	| "retry"
-	| "check-watch";
+	| "check-watch"
+	| "swarm";
 
 /** A single persisted run entry written to .evalgate/runs.ndjson */
 export interface RunRecord {

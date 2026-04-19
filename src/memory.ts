@@ -9,7 +9,11 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { getBudgetSummary } from "./budget.js";
+
+const _require = createRequire(import.meta.url);
+
 import { queryRuns } from "./log.js";
 import { listMessages } from "./messages.js";
 import { parseTodo } from "./parser.js";
@@ -221,7 +225,7 @@ export function exportSnapshot(todoPath: string): ProjectSnapshot {
 	return {
 		exportedAt: new Date().toISOString(),
 		todoPath,
-		version: "0.7.0",
+		version: _require("../package.json").version as string,
 		contracts,
 		runs,
 		budget,
