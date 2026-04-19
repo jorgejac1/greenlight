@@ -5,7 +5,7 @@
 
 [![MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 [![Node 18+](https://img.shields.io/badge/node-18%2B-blue.svg)](#)
-[![v0.14.1](https://img.shields.io/badge/version-v0.14.1-brightgreen.svg)](#roadmap)
+[![v1.0.0](https://img.shields.io/badge/version-v1.0.0-brightgreen.svg)](#roadmap)
 
 ---
 
@@ -612,7 +612,26 @@ evalgate check todo.md || echo "Contracts failed — review before merging."
 | v0.12 | Structured swarm events — `"eval-result"`, `"cost"`, `"task-complete"` typed events on `swarmEvents`; `SwarmEvent` discriminated union exported | Shipped |
 | v0.13 | Re-check watch mode — `evalgate check --watch` re-runs failing contracts on file change; TDD inner loop for agents | Shipped |
 | v0.14 | Semantic-diff verifier — `eval.diff` kind: assert a structural change happened in a file (pattern/hash-based, zero deps) | Shipped |
-| v1.0 | API stability declaration — stable public surface, migration guide v0.x → v1.0, coordinated with conductor v1.0 | Planned |
+| v1.0 | API stability declaration — stable public surface, `VERSION` export, coordinated with conductor v1.0. Agent-agnostic context injection (`taskContext` on `SpawnOpts`/`SwarmOptions`), `{task}` placeholder in `agentArgs` for non-Claude CLIs, concurrent merge fix (mutex serializes commit+merge to eliminate `todo.md` conflicts at any concurrency) | Shipped |
+
+---
+
+## v1.0 Stability
+
+As of v1.0.0 the public API surface exported from `evalgate` (`src/index.ts`) is **stable** and follows semantic versioning:
+
+- Breaking changes require a major version bump
+- New exports are added in minor releases
+- Bug fixes ship as patches
+
+**Stable public exports:** `runSwarm`, `retryWorker`, `swarmEvents`, `parseTodo`, `runContract`, `runShell`, `budget.*`, `log.*`, `telegram.*`, `startMcpServer`, `startCheckWatch`, `parseCron`, `matchesCron`, `nextFireMs`, `worktree.*`, and all exported types from `types.ts`
+
+**Also exported:** `VERSION` — the current package version as a string, useful for downstream consumers that want to display or validate the evalgate version.
+
+```ts
+import { VERSION } from "evalgate";
+console.log(VERSION); // "1.0.0"
+```
 
 ---
 
