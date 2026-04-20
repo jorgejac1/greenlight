@@ -18,7 +18,10 @@ export async function runShell(v: ShellVerifier, cwd: string): Promise<ShellOutc
 	const timeoutMs = v.timeoutMs ?? 120_000;
 
 	return new Promise((resolve) => {
-		const child = spawn(v.command, { shell: true, cwd });
+		// detached: true puts the child in its own process group so we can
+		// kill the entire group (shell + its children) with process.kill(-pid).
+		// Without this, SIGTERM sent to the shell on Linux orphans grandchildren.
+		const child = spawn(v.command, { shell: true, cwd, detached: true });
 		let stdout = "";
 		let stderr = "";
 		let timedOut = false;
@@ -30,11 +33,25 @@ export async function runShell(v: ShellVerifier, cwd: string): Promise<ShellOutc
 			stderr += d.toString();
 		});
 
+		function killGroup(signal: NodeJS.Signals): void {
+			try {
+				// Negative PID kills the process group (shell + all children).
+				if (child.pid !== undefined) process.kill(-child.pid, signal);
+			} catch {
+				// Fallback in case the group is already gone.
+				try {
+					child.kill(signal);
+				} catch {
+					/* ignore */
+				}
+			}
+		}
+
 		let sigkillTimer: ReturnType<typeof setTimeout> | undefined;
 		const timer = setTimeout(() => {
 			timedOut = true;
-			child.kill("SIGTERM");
-			sigkillTimer = setTimeout(() => child.kill("SIGKILL"), 2_000);
+			killGroup("SIGTERM");
+			sigkillTimer = setTimeout(() => killGroup("SIGKILL"), 2_000);
 		}, timeoutMs);
 
 		child.on("error", (err) => {
