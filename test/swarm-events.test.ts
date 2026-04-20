@@ -12,8 +12,14 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { runSwarm, swarmEvents } from "../src/swarm.js";
-import type { EvalResultEvent, TaskCompleteEvent } from "../src/types.js";
+import { retryWorker, runSwarm, swarmEvents } from "../src/swarm.js";
+import { loadState } from "../src/swarm-state.js";
+import type {
+	EvalResultEvent,
+	TaskCompleteEvent,
+	WorkerRetryEvent,
+	WorkerStartEvent,
+} from "../src/types.js";
 
 // ---------------------------------------------------------------------------
 // Helpers (duplicated from swarm.test.ts — keep tests self-contained)
@@ -175,6 +181,137 @@ test('"task-complete" fires before runSwarm resolves', async () => {
 		assert.equal(received.length, 1, "task-complete event must arrive before runSwarm resolves");
 	} finally {
 		swarmEvents.off("task-complete", listener);
+		cleanup(dir);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// "worker-start" events (v2.1)
+// ---------------------------------------------------------------------------
+
+test('"worker-start" fires when a worker transitions to spawning', async () => {
+	const dir = makeTmpRepo();
+	const received: WorkerStartEvent[] = [];
+	const listener = (evt: WorkerStartEvent) => received.push(evt);
+	swarmEvents.on("worker-start", listener);
+
+	try {
+		const todoPath = writeTodo(dir, "- [ ] Task WS\n  - eval: `true`\n");
+		await runSwarm({
+			todoPath,
+			agentCmd: "node",
+			agentArgs: ["-e", "process.exit(0)"],
+		});
+
+		assert.equal(received.length, 1, "should emit exactly one worker-start");
+		const evt = received[0];
+		assert.equal(evt.type, "worker-start");
+		assert.ok(typeof evt.workerId === "string" && evt.workerId.length > 0);
+		assert.ok(typeof evt.contractId === "string" && evt.contractId.length > 0);
+	} finally {
+		swarmEvents.off("worker-start", listener);
+		cleanup(dir);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// "worker-retry" events (v2.1)
+// ---------------------------------------------------------------------------
+
+test('"worker-retry" fires when retryWorker is called on a failed worker', async () => {
+	const dir = makeTmpRepo();
+	const retryEvents: WorkerRetryEvent[] = [];
+	const startEvents: WorkerStartEvent[] = [];
+	const retryListener = (evt: WorkerRetryEvent) => retryEvents.push(evt);
+	const startListener = (evt: WorkerStartEvent) => startEvents.push(evt);
+	swarmEvents.on("worker-retry", retryListener);
+	swarmEvents.on("worker-start", startListener);
+
+	try {
+		// First run: verifier fails so the worker ends up in "failed" state.
+		const todoPath = writeTodo(dir, "- [ ] Task Retry\n  - eval: `false`\n");
+		await runSwarm({
+			todoPath,
+			agentCmd: "node",
+			agentArgs: ["-e", "process.exit(0)"],
+		});
+
+		const state = loadState(todoPath);
+		assert.ok(state, "swarm state must exist");
+		const failedWorker = state.workers.find((w) => w.status === "failed");
+		assert.ok(failedWorker, "must have a failed worker to retry");
+
+		// Update verifier to pass so the retry succeeds.
+		writeFileSync(todoPath, "- [ ] Task Retry\n  - eval: `true`\n");
+		execSync("git add todo.md && git commit --no-gpg-sign -m 'fix verifier'", {
+			cwd: dir,
+			stdio: "pipe",
+			shell: true,
+		});
+
+		await retryWorker(failedWorker.id, todoPath, {
+			todoPath,
+			agentCmd: "node",
+			agentArgs: ["-e", "process.exit(0)"],
+		});
+
+		assert.equal(retryEvents.length, 1, "worker-retry should fire exactly once");
+		assert.equal(retryEvents[0].type, "worker-retry");
+		assert.equal(retryEvents[0].workerId, failedWorker.id);
+		// worker-start fires for the initial run and again on retry = 2 total.
+		assert.ok(startEvents.length >= 2, "worker-start should fire for both runs");
+	} finally {
+		swarmEvents.off("worker-retry", retryListener);
+		swarmEvents.off("worker-start", startListener);
+		cleanup(dir);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// failureKind on WorkerState and reason on TaskCompleteEvent (v2.1)
+// ---------------------------------------------------------------------------
+
+test('"task-complete" includes reason="verifier-fail" when verifier fails', async () => {
+	const dir = makeTmpRepo();
+	const received: TaskCompleteEvent[] = [];
+	const listener = (evt: TaskCompleteEvent) => received.push(evt);
+	swarmEvents.on("task-complete", listener);
+
+	try {
+		const todoPath = writeTodo(dir, "- [ ] Task FK\n  - eval: `false`\n");
+		await runSwarm({
+			todoPath,
+			agentCmd: "node",
+			agentArgs: ["-e", "process.exit(0)"],
+		});
+
+		assert.equal(received.length, 1);
+		const evt = received[0];
+		assert.equal(evt.status, "failed");
+		assert.equal(evt.reason, "verifier-fail");
+	} finally {
+		swarmEvents.off("task-complete", listener);
+		cleanup(dir);
+	}
+});
+
+test("WorkerState.failureKind is set to verifier-fail when verifier fails", async () => {
+	const dir = makeTmpRepo();
+
+	try {
+		const todoPath = writeTodo(dir, "- [ ] Task FKS\n  - eval: `false`\n");
+		await runSwarm({
+			todoPath,
+			agentCmd: "node",
+			agentArgs: ["-e", "process.exit(0)"],
+		});
+
+		const state = loadState(todoPath);
+		assert.ok(state, "swarm state must exist");
+		const failedWorker = state.workers.find((w) => w.status === "failed");
+		assert.ok(failedWorker, "must have a failed worker");
+		assert.equal(failedWorker.failureKind, "verifier-fail");
+	} finally {
 		cleanup(dir);
 	}
 });

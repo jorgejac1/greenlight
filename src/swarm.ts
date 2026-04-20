@@ -28,8 +28,11 @@ import { loadState, saveState, updateWorker } from "./swarm-state.js";
 import type {
 	Contract,
 	EvalResultEvent,
+	FailureKind,
 	SwarmState,
 	TaskCompleteEvent,
+	WorkerRetryEvent,
+	WorkerStartEvent,
 	WorkerState,
 	WorkerStatus,
 } from "./types.js";
@@ -150,12 +153,18 @@ function emitWorker(
 	if (state) swarmEvents.emit("state", state);
 }
 
-function emitTaskComplete(workerId: string, contractId: string, status: "done" | "failed"): void {
+function emitTaskComplete(
+	workerId: string,
+	contractId: string,
+	status: "done" | "failed",
+	reason?: FailureKind,
+): void {
 	swarmEvents.emit("task-complete", {
 		type: "task-complete",
 		workerId,
 		contractId,
 		status,
+		...(reason !== undefined ? { reason } : {}),
 	} satisfies TaskCompleteEvent);
 }
 
@@ -178,14 +187,22 @@ async function runWorker(
 
 	// ── 1. spawning ──────────────────────────────────────────────────────────
 	emitWorker(todoPath, worker.id, "spawning", { startedAt: now() });
+	swarmEvents.emit("worker-start", {
+		type: "worker-start",
+		workerId: worker.id,
+		contractId: contract.id,
+	} satisfies WorkerStartEvent);
 
 	try {
 		createWorktree(repoRoot, worker.branch, worker.worktreePath);
 	} catch (err) {
 		const msg = err instanceof Error ? err.message : String(err);
 		writeFileSync(worker.logPath, `[evalgate swarm] worktree creation failed: ${msg}\n`);
-		emitWorker(todoPath, worker.id, "failed", { finishedAt: now() });
-		emitTaskComplete(worker.id, contract.id, "failed");
+		emitWorker(todoPath, worker.id, "failed", {
+			finishedAt: now(),
+			failureKind: "worktree-create",
+		});
+		emitTaskComplete(worker.id, contract.id, "failed", "worktree-create");
 		return;
 	}
 
@@ -206,6 +223,18 @@ async function runWorker(
 		env: extraEnv,
 	});
 
+	// Exit code -2 is the timeout sentinel set by spawnAgent when agentTimeoutMs
+	// is exceeded. Don't proceed to verifier — the agent didn't finish its work.
+	if (agentExit === -2) {
+		emitWorker(todoPath, worker.id, "failed", {
+			agentExitCode: agentExit,
+			finishedAt: now(),
+			failureKind: "agent-timeout",
+		});
+		emitTaskComplete(worker.id, contract.id, "failed", "agent-timeout");
+		return;
+	}
+
 	// ── 3. verifying ─────────────────────────────────────────────────────────
 	emitWorker(todoPath, worker.id, "verifying", { agentExitCode: agentExit });
 
@@ -225,8 +254,13 @@ async function runWorker(
 
 	if (!result.passed) {
 		// Keep the worktree for human inspection.
-		emitWorker(todoPath, worker.id, "failed", { verifierPassed: false, finishedAt: now() });
-		emitTaskComplete(worker.id, contract.id, "failed");
+		const verifierFailureKind: FailureKind = result.timedOut ? "verifier-timeout" : "verifier-fail";
+		emitWorker(todoPath, worker.id, "failed", {
+			verifierPassed: false,
+			finishedAt: now(),
+			failureKind: verifierFailureKind,
+		});
+		emitTaskComplete(worker.id, contract.id, "failed", verifierFailureKind);
 		// Mirror FAIL to canonical todoPath — eval definitively failed, record it now.
 		appendRun(result, todoPath, "swarm");
 		return;
@@ -272,8 +306,11 @@ async function runWorker(
 		// Merge conflict or other git failure — keep the worktree.
 		const msg = err instanceof Error ? err.message : String(err);
 		writeFileSync(worker.logPath, `\n[evalgate swarm] merge failed: ${msg}\n`, { flag: "a" });
-		emitWorker(todoPath, worker.id, "failed", { finishedAt: now() });
-		emitTaskComplete(worker.id, contract.id, "failed");
+		emitWorker(todoPath, worker.id, "failed", {
+			finishedAt: now(),
+			failureKind: "merge-conflict",
+		});
+		emitTaskComplete(worker.id, contract.id, "failed", "merge-conflict");
 		return;
 	} finally {
 		if (mergeMutex) mergeMutex.release();
@@ -381,6 +418,13 @@ export async function retryWorker(
 			`contract "${freshWorker.contractId}" not found in ${resolvedTodoPath} — was the task removed?`,
 		);
 	}
+
+	// Announce the retry before spawning so consumers can update UI state.
+	swarmEvents.emit("worker-retry", {
+		type: "worker-retry",
+		workerId,
+		contractId: freshWorker.contractId,
+	} satisfies WorkerRetryEvent);
 
 	// Run the full worker lifecycle with the failure context injected via env.
 	await runWorker(freshWorker, contract, resolvedTodoPath, repoRoot, opts, {

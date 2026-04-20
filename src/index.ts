@@ -42,6 +42,7 @@ export type {
 	CostEvent,
 	DiffVerifier,
 	EvalResultEvent,
+	FailureKind,
 	GatewayConfig,
 	LlmVerifier,
 	McpCapabilities,
@@ -64,6 +65,8 @@ export type {
 	Verifier,
 	WatchTrigger,
 	WebhookTrigger,
+	WorkerRetryEvent,
+	WorkerStartEvent,
 	WorkerState,
 	WorkerStatus,
 } from "./types.js";

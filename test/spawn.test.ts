@@ -257,6 +257,27 @@ test("spawnAgent falls back to default args when agentArgs is empty array", asyn
 	}
 });
 
+test("spawnAgent resolves with -2 when agentTimeoutMs is exceeded", async () => {
+	const dir = makeTmpDir();
+	try {
+		const logPath = join(dir, "sessions", "timeout.log");
+		const exitCode = await spawnAgent({
+			cwd: dir,
+			task: "long task",
+			logPath,
+			agentCmd: "node",
+			// Sleep for 30 s — far longer than the 150 ms timeout below.
+			agentArgs: ["-e", "setTimeout(() => {}, 30_000)"],
+			agentTimeoutMs: 150,
+		});
+		assert.equal(exitCode, -2, "timeout should resolve with exit code -2");
+		const contents = readFileSync(logPath, "utf8");
+		assert.ok(contents.includes("timed out"), "log should mention timeout");
+	} finally {
+		cleanup(dir);
+	}
+});
+
 test("spawnAgent escapes newlines in log header", async () => {
 	const dir = makeTmpDir();
 	try {

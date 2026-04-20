@@ -62,6 +62,8 @@ export interface CompositeVerifier {
 	/** "all" — every step must pass; "any" — at least one step must pass */
 	mode: "all" | "any";
 	steps: ShellVerifier[];
+	/** Aggregate wall-clock timeout across all steps in ms. */
+	timeoutMs?: number;
 }
 
 /** LLM-judge verifier — calls Claude API to evaluate output quality (v0.8+). */
@@ -117,6 +119,8 @@ export interface RunResult {
 	stderr: string;
 	exitCode: number;
 	durationMs: number;
+	/** True when the verifier was killed due to a timeout (implies passed = false). */
+	timedOut?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +191,18 @@ export type WorkerStatus =
 	| "done"
 	| "failed";
 
+/**
+ * Classifies why a worker reached the "failed" terminal state.
+ * Available on WorkerState.failureKind and TaskCompleteEvent.reason (v2.1+).
+ */
+export type FailureKind =
+	| "worktree-create"
+	| "agent-crash"
+	| "agent-timeout"
+	| "verifier-fail"
+	| "verifier-timeout"
+	| "merge-conflict";
+
 /** Persisted record for one agent worker managed by the swarm orchestrator. */
 export interface WorkerState {
 	/** Short unique id for this worker run. */
@@ -207,6 +223,8 @@ export interface WorkerState {
 	agentExitCode?: number;
 	/** Whether the evalgate verifier passed in the worktree. */
 	verifierPassed?: boolean;
+	/** Classifies why this worker failed. Only set when status === "failed". */
+	failureKind?: FailureKind;
 	/** Absolute path to the agent session log file. */
 	logPath: string;
 }
@@ -251,10 +269,31 @@ export interface TaskCompleteEvent {
 	workerId: string;
 	contractId: string;
 	status: "done" | "failed";
+	/** Classifies the failure cause. Only present when status === "failed". */
+	reason?: FailureKind;
+}
+
+/** Emitted on swarmEvents when a worker transitions to the "spawning" state (v2.1+). */
+export interface WorkerStartEvent {
+	type: "worker-start";
+	workerId: string;
+	contractId: string;
+}
+
+/** Emitted on swarmEvents when a failed worker is queued for retry (v2.1+). */
+export interface WorkerRetryEvent {
+	type: "worker-retry";
+	workerId: string;
+	contractId: string;
 }
 
 /** Discriminated union of all structured swarm events (v0.12+). */
-export type SwarmEvent = EvalResultEvent | CostEvent | TaskCompleteEvent;
+export type SwarmEvent =
+	| EvalResultEvent
+	| CostEvent
+	| TaskCompleteEvent
+	| WorkerStartEvent
+	| WorkerRetryEvent;
 
 // ---------------------------------------------------------------------------
 // MCP protocol types (v0.2)

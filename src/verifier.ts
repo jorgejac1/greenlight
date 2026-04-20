@@ -68,14 +68,32 @@ async function runComposite(
 	cwd: string,
 	mode: "all" | "any",
 	steps: ShellVerifier[],
+	aggregateTimeoutMs?: number,
 ): Promise<RunResult> {
 	const start = Date.now();
 	const outputs: string[] = [];
 	let passed = false;
+	let timedOut = false;
 
-	for (const step of steps) {
+	for (const baseStep of steps) {
+		let step = baseStep;
+		// If an aggregate timeout is set, cap each remaining step to the budget left.
+		if (aggregateTimeoutMs !== undefined) {
+			const elapsed = Date.now() - start;
+			const remaining = aggregateTimeoutMs - elapsed;
+			if (remaining <= 0) {
+				timedOut = true;
+				outputs.push(`[aggregate timeout] exceeded ${aggregateTimeoutMs}ms`);
+				passed = false;
+				break;
+			}
+			// Clamp the per-step timeout to the remaining aggregate budget.
+			step = { ...step, timeoutMs: Math.min(step.timeoutMs ?? 120_000, remaining) };
+		}
+
 		const r = await runShell(step, cwd);
 		const stepPassed = r.exitCode === 0 && !r.timedOut;
+		if (r.timedOut) timedOut = true;
 		outputs.push(
 			`[${step.command}] exit ${r.exitCode}\n` +
 				(r.stdout.trim() ? r.stdout : "") +
@@ -97,9 +115,10 @@ async function runComposite(
 		contract,
 		passed,
 		stdout: outputs.join("\n---\n"),
-		stderr: "",
+		stderr: timedOut ? `[evalgate] composite verifier timed out after ${aggregateTimeoutMs}ms` : "",
 		exitCode: passed ? 0 : 1,
 		durationMs: Date.now() - start,
+		timedOut,
 	};
 }
 
@@ -128,7 +147,16 @@ async function runLlmJudge(contract: Contract, prompt: string, model: string): P
 		],
 	});
 
+	const LLM_TIMEOUT_MS = 60_000;
+
 	return new Promise((resolve) => {
+		let settled = false;
+		function settle(result: RunResult): void {
+			if (settled) return;
+			settled = true;
+			resolve(result);
+		}
+
 		const req = request(
 			{
 				hostname: "api.anthropic.com",
@@ -154,7 +182,7 @@ async function runLlmJudge(contract: Contract, prompt: string, model: string): P
 							error?: { message: string };
 						};
 						if (json.error) {
-							resolve({
+							settle({
 								contract,
 								passed: false,
 								stdout: "",
@@ -166,7 +194,7 @@ async function runLlmJudge(contract: Contract, prompt: string, model: string): P
 						}
 						const text = (json.content?.[0]?.text ?? "").trim().toUpperCase();
 						const passed = text.startsWith("PASS");
-						resolve({
+						settle({
 							contract,
 							passed,
 							stdout: text,
@@ -175,20 +203,37 @@ async function runLlmJudge(contract: Contract, prompt: string, model: string): P
 							durationMs,
 						});
 					} catch (e) {
-						resolve({
+						settle({
 							contract,
 							passed: false,
 							stdout: "",
 							stderr: `parse error: ${e}`,
 							exitCode: -1,
-							durationMs,
+							durationMs: Date.now() - start,
 						});
 					}
 				});
 			},
 		);
+
+		// Hard timeout: destroy the request after 60 s.
+		const timeoutTimer = setTimeout(() => {
+			req.destroy();
+			settle({
+				contract,
+				passed: false,
+				stdout: "",
+				stderr: `[evalgate] LLM verifier timed out after ${LLM_TIMEOUT_MS}ms`,
+				exitCode: -1,
+				durationMs: Date.now() - start,
+				timedOut: true,
+			});
+		}, LLM_TIMEOUT_MS);
+		if (timeoutTimer.unref) timeoutTimer.unref();
+
 		req.on("error", (e) => {
-			resolve({
+			clearTimeout(timeoutTimer);
+			settle({
 				contract,
 				passed: false,
 				stdout: "",
@@ -278,9 +323,16 @@ export async function runContract(
 			stderr: r.stderr,
 			exitCode: r.exitCode,
 			durationMs: r.durationMs,
+			timedOut: r.timedOut || undefined,
 		};
 	} else if (contract.verifier.kind === "composite") {
-		result = await runComposite(contract, cwd, contract.verifier.mode, contract.verifier.steps);
+		result = await runComposite(
+			contract,
+			cwd,
+			contract.verifier.mode,
+			contract.verifier.steps,
+			contract.verifier.timeoutMs,
+		);
 	} else if (contract.verifier.kind === "llm") {
 		const model = contract.verifier.model ?? "claude-haiku-4-5-20251001";
 		result = await runLlmJudge(contract, contract.verifier.prompt, model);

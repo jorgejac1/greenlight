@@ -45,6 +45,12 @@ export interface SpawnOpts {
 	 * Merged on top of process.env — use this for retry context injection.
 	 */
 	env?: Record<string, string>;
+	/**
+	 * Maximum time in milliseconds the agent process is allowed to run.
+	 * When exceeded: SIGTERM is sent, then SIGKILL after a 5 s grace period.
+	 * The function resolves with exit code -2 (timeout sentinel).
+	 */
+	agentTimeoutMs?: number;
 }
 
 /**
@@ -95,6 +101,27 @@ export async function spawnAgent(opts: SpawnOpts): Promise<number> {
 			if (settled) return;
 			settled = true;
 			logStream.end(() => resolve(code));
+		}
+
+		// Agent process timeout: SIGTERM → SIGKILL (5 s grace) → resolve(-2).
+		if (opts.agentTimeoutMs != null) {
+			const killTimer = setTimeout(() => {
+				if (settled) return;
+				logStream.write(
+					`\n[evalgate swarm] agent timed out after ${opts.agentTimeoutMs}ms — sending SIGTERM\n`,
+				);
+				child.kill("SIGTERM");
+				// If process doesn't exit within 5 s, force-kill it.
+				const forceTimer = setTimeout(() => {
+					if (!settled) child.kill("SIGKILL");
+				}, 5_000);
+				// Don't let forceTimer keep the event loop alive if the process exits cleanly.
+				if (forceTimer.unref) forceTimer.unref();
+				// Resolve with -2 timeout sentinel immediately after SIGTERM.
+				settle(-2);
+			}, opts.agentTimeoutMs);
+			// Don't keep event loop alive waiting for a timeout that may never fire.
+			if (killTimer.unref) killTimer.unref();
 		}
 
 		child.stdout?.on("data", (chunk: Buffer) => {
