@@ -3,7 +3,15 @@ import { readFileSync } from "node:fs";
 import { request } from "node:https";
 import { resolve } from "node:path";
 import { appendRun } from "./log.js";
-import type { Contract, DiffVerifier, RunResult, ShellVerifier, TriggerSource } from "./types.js";
+import type {
+	Contract,
+	DiffVerifier,
+	HttpVerifier,
+	RunResult,
+	SchemaVerifier,
+	ShellVerifier,
+	TriggerSource,
+} from "./types.js";
 
 interface ShellOutcome {
 	stdout: string;
@@ -313,6 +321,201 @@ function runDiff(verifier: DiffVerifier, cwd: string, contract: Contract): RunRe
 	};
 }
 
+async function runHttp(v: HttpVerifier, contract: Contract): Promise<RunResult> {
+	const start = Date.now();
+	const expectedStatus = v.status ?? 200;
+	const timeoutMs = v.timeoutMs ?? 10_000;
+
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+	try {
+		const res = await fetch(v.url, { signal: controller.signal });
+		clearTimeout(timer);
+		const body = await res.text();
+		const durationMs = Date.now() - start;
+
+		if (res.status !== expectedStatus) {
+			return {
+				contract,
+				passed: false,
+				stdout: body,
+				stderr: `expected status ${expectedStatus}, got ${res.status}`,
+				exitCode: 1,
+				durationMs,
+			};
+		}
+
+		if (v.contains !== undefined && !body.includes(v.contains)) {
+			return {
+				contract,
+				passed: false,
+				stdout: body,
+				stderr: `response body does not contain: ${v.contains}`,
+				exitCode: 1,
+				durationMs,
+			};
+		}
+
+		return {
+			contract,
+			passed: true,
+			stdout: body,
+			stderr: "",
+			exitCode: 0,
+			durationMs,
+		};
+	} catch (err) {
+		clearTimeout(timer);
+		const durationMs = Date.now() - start;
+		const isAbort = err instanceof Error && err.name === "AbortError";
+		return {
+			contract,
+			passed: false,
+			stdout: "",
+			stderr: isAbort
+				? `[evalgate] HTTP verifier timed out after ${timeoutMs}ms`
+				: `fetch error: ${err instanceof Error ? err.message : String(err)}`,
+			exitCode: 1,
+			durationMs,
+			timedOut: isAbort || undefined,
+		};
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Minimal zero-dep JSON schema validator (type + required + properties.type)
+// ---------------------------------------------------------------------------
+
+type JsonSchemaType = "object" | "array" | "string" | "number" | "boolean";
+
+interface MinimalSchema {
+	type?: JsonSchemaType;
+	required?: string[];
+	properties?: Record<string, { type?: JsonSchemaType }>;
+}
+
+function checkJsonType(value: unknown, expected: JsonSchemaType): boolean {
+	switch (expected) {
+		case "object":
+			return typeof value === "object" && value !== null && !Array.isArray(value);
+		case "array":
+			return Array.isArray(value);
+		case "string":
+			return typeof value === "string";
+		case "number":
+			return typeof value === "number";
+		case "boolean":
+			return typeof value === "boolean";
+	}
+}
+
+function runSchema(v: SchemaVerifier, cwd: string, contract: Contract): RunResult {
+	const filePath = resolve(cwd, v.file);
+	const start = Date.now();
+
+	let raw: string;
+	try {
+		raw = readFileSync(filePath, "utf8");
+	} catch {
+		return {
+			contract,
+			passed: false,
+			stdout: "",
+			stderr: `file not found: ${v.file}`,
+			exitCode: 1,
+			durationMs: Date.now() - start,
+		};
+	}
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return {
+			contract,
+			passed: false,
+			stdout: "",
+			stderr: `invalid JSON in file: ${v.file}`,
+			exitCode: 1,
+			durationMs: Date.now() - start,
+		};
+	}
+
+	let schema: MinimalSchema;
+	try {
+		schema = JSON.parse(v.schema) as MinimalSchema;
+	} catch {
+		return {
+			contract,
+			passed: false,
+			stdout: "",
+			stderr: `invalid schema JSON: ${v.schema}`,
+			exitCode: 1,
+			durationMs: Date.now() - start,
+		};
+	}
+
+	// Check top-level type
+	if (schema.type !== undefined && !checkJsonType(parsed, schema.type)) {
+		return {
+			contract,
+			passed: false,
+			stdout: "",
+			stderr: `expected type "${schema.type}", got ${Array.isArray(parsed) ? "array" : typeof parsed}`,
+			exitCode: 1,
+			durationMs: Date.now() - start,
+		};
+	}
+
+	const obj = parsed as Record<string, unknown>;
+
+	// Check required fields
+	if (schema.required !== undefined) {
+		for (const key of schema.required) {
+			if (!(key in obj)) {
+				return {
+					contract,
+					passed: false,
+					stdout: "",
+					stderr: `missing required field: "${key}"`,
+					exitCode: 1,
+					durationMs: Date.now() - start,
+				};
+			}
+		}
+	}
+
+	// Check properties types
+	if (schema.properties !== undefined) {
+		for (const [key, propSchema] of Object.entries(schema.properties)) {
+			if (
+				propSchema.type !== undefined &&
+				key in obj &&
+				!checkJsonType(obj[key], propSchema.type)
+			) {
+				return {
+					contract,
+					passed: false,
+					stdout: "",
+					stderr: `property "${key}" expected type "${propSchema.type}", got ${Array.isArray(obj[key]) ? "array" : typeof obj[key]}`,
+					exitCode: 1,
+					durationMs: Date.now() - start,
+				};
+			}
+		}
+	}
+
+	return {
+		contract,
+		passed: true,
+		stdout: "schema validation passed",
+		stderr: "",
+		exitCode: 0,
+		durationMs: Date.now() - start,
+	};
+}
+
 export async function runContract(
 	contract: Contract,
 	cwd: string,
@@ -355,6 +558,10 @@ export async function runContract(
 		result = await runLlmJudge(contract, contract.verifier.prompt, model);
 	} else if (contract.verifier.kind === "diff") {
 		result = runDiff(contract.verifier, cwd, contract);
+	} else if (contract.verifier.kind === "http") {
+		result = await runHttp(contract.verifier, contract);
+	} else if (contract.verifier.kind === "schema") {
+		result = runSchema(contract.verifier, cwd, contract);
 	} else {
 		result = {
 			contract,

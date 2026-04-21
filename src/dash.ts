@@ -99,7 +99,11 @@ function render(todoPath: string): void {
 							? `${c.verifier.mode}(${c.verifier.steps.length})`
 							: c.verifier.kind === "llm"
 								? `llm: ${c.verifier.prompt.slice(0, 40)}`
-								: `diff: ${c.verifier.file} ${c.verifier.mode}`) +
+								: c.verifier.kind === "diff"
+									? `diff: ${c.verifier.file} ${c.verifier.mode}`
+									: c.verifier.kind === "http"
+										? `http: ${c.verifier.url}`
+										: `schema: ${c.verifier.file}`) +
 					C.reset
 				: "";
 			push(`  ${mark} ${c.title}${cmd}`);

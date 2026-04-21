@@ -107,7 +107,13 @@ task-list item with indented sub-bullet fields:
   - eval.any: `cmd1` | `cmd2`
   - eval.llm: judge prompt as plain text
   - eval.diff: src/file.ts contains "new pattern"
+  - eval.http: http://localhost:3000/health
+  - eval.http.status: 200
+  - eval.http.contains: "healthy"
+  - eval.http.timeout: 5000
+  - eval.schema: output.json {"type":"object","required":["id"]}
   - retries: 3
+  - retry-if: exit-code > 1
   - budget: 50k
   - id: stable-slug
   - on: schedule: "0 * * * *"
@@ -123,9 +129,15 @@ task-list item with indented sub-bullet fields:
 | `eval.all`  | yes*     | Pipe-separated commands — **all** must exit 0. |
 | `eval.any`  | yes*     | Pipe-separated commands — **any one** must exit 0. |
 | `eval.llm`  | yes*     | Natural-language prompt judged by Claude. Answers PASS or FAIL. |
-| `eval.diff` | yes*     | Assert a structural change in a file: `contains`, `not contains`, `deleted`, `created`, `changed`. Zero deps. |
-| `retries`   | no       | Max retry attempts hint for orchestrators. |
-| `budget`    | no       | Token budget: `50k`, `1.5m`, or raw integer. |
+| `eval.diff`           | yes*     | Assert a structural change in a file: `contains`, `not contains`, `deleted`, `created`, `changed`. Zero deps. |
+| `eval.http`           | yes*     | HTTP health check — GET request; passes if status matches (default 200). Uses built-in `fetch` (Node 18+). |
+| `eval.http.status`    | no       | Expected HTTP status code. Defaults to `200`. |
+| `eval.http.contains`  | no       | Substring that must appear in the response body. |
+| `eval.http.timeout`   | no       | Request timeout in ms. Defaults to `10000`. |
+| `eval.schema`         | yes*     | JSON schema validator — `<file> <inline-json-schema>`. Checks `type`, `required[]`, `properties[].type`. Zero deps. |
+| `retries`             | no       | Max retry attempts hint for orchestrators. |
+| `retry-if`            | no       | Only consume a retry slot when condition is true: `exit-code <op> <n>`. Operators: `==` `!=` `>` `<` `>=` `<=`. |
+| `budget`              | no       | Token budget: `50k`, `1.5m`, or raw integer. |
 | `id`        | no       | Stable slug for references and logs. Defaults to slugified title. |
 | `provider`  | no       | Preferred model: `opus`, `sonnet`, or `haiku`. |
 | `role`      | no       | Agent role hint: `coordinator`, `worker`, or `linter`. |
@@ -173,6 +185,57 @@ Requires `ANTHROPIC_API_KEY`. Defaults to `claude-haiku-4-5-20251001`.
 ```
 
 Supported assertions: `contains "<text>"`, `not contains "<text>"`, `deleted`, `created`, `changed`.
+
+**HTTP verifier** — issues a GET request and checks status code + optional body substring. Uses Node's built-in `fetch` (requires Node 18+). Zero external dependencies:
+
+```markdown
+- [ ] Service is healthy
+  - eval.http: http://localhost:3000/health
+
+- [ ] API returns correct status
+  - eval.http: http://localhost:3000/api/status
+  - eval.http.status: 201
+  - eval.http.contains: "ready"
+  - eval.http.timeout: 5000
+```
+
+| Sub-field | Description |
+| --------- | ----------- |
+| `eval.http: <url>` | GET request to `<url>`. Passes if status matches (default 200). |
+| `eval.http.status: <n>` | Expected HTTP status code. |
+| `eval.http.contains: <text>` | Response body must contain this substring. |
+| `eval.http.timeout: <ms>` | Request timeout in ms (default 10000). |
+
+**Schema verifier** — reads a JSON file and validates its structure against an inline schema. Zero external dependencies:
+
+```markdown
+- [ ] Agent produced valid output
+  - eval.schema: dist/output.json {"type":"object","required":["id","score"]}
+
+- [ ] Response is an array
+  - eval.schema: response.json {"type":"array"}
+
+- [ ] Fields have correct types
+  - eval.schema: result.json {"type":"object","properties":{"id":{"type":"string"},"score":{"type":"number"}}}
+```
+
+Inline schema supports: `type` (`object`, `array`, `string`, `number`, `boolean`), `required` (array of field names), `properties` with per-field `type` checks.
+
+**Conditional retry** — only consume a retry slot when the exit-code condition is met. Useful when certain exit codes indicate a transient failure (worth retrying) vs a permanent one (not worth retrying):
+
+```markdown
+- [ ] Flaky network test — retry only on timeout (exit code 2)
+  - eval: `./scripts/smoke-test.sh`
+  - retries: 3
+  - retry-if: exit-code == 2
+
+- [ ] Build — retry on any non-zero exit code
+  - eval: `npm run build`
+  - retries: 2
+  - retry-if: exit-code != 0
+```
+
+Supported operators: `==` `!=` `>` `<` `>=` `<=`. Without `retry-if`, every failure unconditionally consumes a retry slot (existing behaviour).
 
 ### Trigger variants
 
@@ -615,7 +678,7 @@ evalgate check todo.md || echo "Contracts failed — review before merging."
 | v1.0 | API stability declaration — stable public surface, `VERSION` export, coordinated with conductor v1.0. Agent-agnostic context injection (`taskContext` on `SpawnOpts`/`SwarmOptions`), `{task}` placeholder in `agentArgs` for non-Claude CLIs, concurrent merge fix (mutex serializes commit+merge to eliminate `todo.md` conflicts at any concurrency) | Shipped |
 | v2.0 | Repo-level merge mutex, `-X theirs` conflict resolution, `DiffVerifier`, `VERSION` re-export | Shipped |
 | v2.1 | `FailureKind` typed errors (`worktree-create`, `agent-crash`, `agent-timeout`, `verifier-fail`, `verifier-timeout`, `merge-conflict`), `failureKind` on `WorkerState` + `TaskCompleteEvent`, agent timeout (`agentTimeoutMs` on `SpawnOpts`), verifier timeouts (shell + LLM + composite aggregate `timeoutMs`), `"worker-start"` + `"worker-retry"` events on `swarmEvents` | Shipped |
-| v2.2 | Eval type expansion — `eval.http:` (HTTP health check, uses built-in `fetch`), `eval.schema:` (JSON schema validation), conditional retry (`retry-if: exit-code > 1`) | Planned |
+| v2.2 | Eval type expansion — `eval.http:` (HTTP health check, uses built-in `fetch`), `eval.schema:` (JSON schema validation), conditional retry (`retry-if: exit-code > 1`) | Shipped |
 | v2.3 | Plugin hooks + Resume API — `onWorkerStart` / `onWorkerComplete` hooks in `SwarmOptions`, `resumeSwarm(stateFile)` as clean public API | Planned |
 
 ---

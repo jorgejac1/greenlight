@@ -367,6 +367,36 @@ export async function retryWorker(
 		);
 	}
 
+	// Evaluate retryIf condition if defined — skip retry when condition is false.
+	const freshContracts = parseTodo(readFileSync(resolvePath(todoPath), "utf8"));
+	const targetContract = freshContracts.find((c) => c.id === worker.contractId);
+	if (targetContract?.retryIf !== undefined) {
+		const lastExitCode = worker.agentExitCode ?? 0;
+		const { op, value } = targetContract.retryIf.exitCode;
+		const conditionMet =
+			op === "=="
+				? lastExitCode === value
+				: op === "!="
+					? lastExitCode !== value
+					: op === ">"
+						? lastExitCode > value
+						: op === "<"
+							? lastExitCode < value
+							: op === ">="
+								? lastExitCode >= value
+								: lastExitCode <= value;
+		if (!conditionMet) {
+			updateWorker(resolvedTodoPath, workerId, {
+				status: "failed",
+				finishedAt: new Date().toISOString(),
+				failureKind: "verifier-fail",
+			});
+			const finalW = loadState(resolvedTodoPath)?.workers.find((w) => w.id === workerId);
+			if (!finalW) throw new Error(`worker ${workerId} missing from state — this is a bug`);
+			return finalW;
+		}
+	}
+
 	// Write the last 100 lines of the failure log to a temp file so the agent
 	// can read it via EVALGATE_RETRY_CONTEXT_FILE.
 	const contextFile = join(tmpdir(), `evalgate-retry-context-${workerId}-${Date.now()}.txt`);

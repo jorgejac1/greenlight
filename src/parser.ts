@@ -1,4 +1,11 @@
-import type { Contract, ContractTrigger, DiffVerifier, ShellVerifier, Verifier } from "./types.js";
+import type {
+	Contract,
+	ContractTrigger,
+	DiffVerifier,
+	HttpVerifier,
+	ShellVerifier,
+	Verifier,
+} from "./types.js";
 import { slugify } from "./utils.js";
 
 const CHECKBOX_RE = /^(\s*)-\s+\[([ xX])\]\s+(.*)$/;
@@ -59,6 +66,7 @@ export function parseTodo(source: string): Contract[] {
 			provider: buildProvider(fields),
 			role: buildRole(fields),
 			mcpServers: buildMcpServers(fields),
+			retryIf: buildRetryIf(fields),
 			line: i,
 			rawLines,
 		});
@@ -80,6 +88,33 @@ function buildVerifier(fields: Record<string, string>): Verifier | undefined {
 		const m = fields["eval.diff"].match(/^(\S+)\s+(has|lacks)\s+"([^"]+)"$/);
 		if (m) {
 			return { kind: "diff", file: m[1], mode: m[2] as DiffVerifier["mode"], pattern: m[3] };
+		}
+	}
+
+	// HTTP verifier: eval.http: <url>
+	// Optional sub-fields: eval.http.status, eval.http.contains, eval.http.timeout
+	if (fields["eval.http"]) {
+		const verifier: HttpVerifier = { kind: "http", url: fields["eval.http"] };
+		if (fields["eval.http.status"]) {
+			verifier.status = parseInt(fields["eval.http.status"], 10);
+		}
+		if (fields["eval.http.contains"]) {
+			verifier.contains = fields["eval.http.contains"];
+		}
+		if (fields["eval.http.timeout"]) {
+			verifier.timeoutMs = parseInt(fields["eval.http.timeout"], 10);
+		}
+		return verifier;
+	}
+
+	// Schema verifier: eval.schema: <file> <inline-json-schema>
+	if (fields["eval.schema"]) {
+		const raw = fields["eval.schema"];
+		const spaceIdx = raw.indexOf(" ");
+		if (spaceIdx !== -1) {
+			const file = raw.slice(0, spaceIdx);
+			const schema = raw.slice(spaceIdx + 1).trim();
+			return { kind: "schema", file, schema };
 		}
 	}
 
@@ -160,6 +195,21 @@ function buildMcpServers(fields: Record<string, string>): string[] | undefined {
 		.map((s) => s.trim())
 		.filter(Boolean);
 	return servers.length > 0 ? servers : undefined;
+}
+
+function buildRetryIf(fields: Record<string, string>): Contract["retryIf"] {
+	const raw = fields["retry-if"];
+	if (!raw) return undefined;
+
+	// Supported: exit-code <op> <n>
+	// Operators: !=, ==, >, <, >=, <=
+	const m = raw.match(/^exit-code\s+(!=|==|>=|<=|>|<)\s+(\d+)$/);
+	if (!m) return undefined;
+
+	type RetryIfOp = NonNullable<Contract["retryIf"]>["exitCode"]["op"];
+	const op = m[1] as RetryIfOp;
+	const value = parseInt(m[2], 10);
+	return { exitCode: { op, value } };
 }
 
 function stripBackticks(s: string): string {

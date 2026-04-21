@@ -29,6 +29,8 @@ export interface Contract {
 	role?: "coordinator" | "worker" | "linter";
 	/** Whitelist of MCP server names this contract's worker may access (v0.6). */
 	mcpServers?: string[];
+	/** Conditional retry expression — only retry if condition is true. Default: always retry on failure. */
+	retryIf?: { exitCode: { op: "!=" | "==" | ">" | "<" | ">=" | "<="; value: number } };
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +88,34 @@ export interface DiffVerifier {
 	mode: "has" | "lacks";
 }
 
-export type Verifier = ShellVerifier | CompositeVerifier | LlmVerifier | DiffVerifier;
+/** HTTP health-check verifier — issues a GET request and asserts status + optional body substring (v2.2+). */
+export interface HttpVerifier {
+	kind: "http";
+	url: string;
+	/** Expected HTTP status code — default 200 */
+	status?: number;
+	/** Optional substring that must appear in the response body */
+	contains?: string;
+	/** Request timeout in ms — default 10_000 */
+	timeoutMs?: number;
+}
+
+/** JSON schema shape validator — reads a file and checks it against a minimal inline schema (v2.2+). */
+export interface SchemaVerifier {
+	kind: "schema";
+	/** Path to JSON file relative to cwd. */
+	file: string;
+	/** Inline JSON schema (minimal: type, required, properties with type checks only). */
+	schema: string;
+}
+
+export type Verifier =
+	| ShellVerifier
+	| CompositeVerifier
+	| LlmVerifier
+	| DiffVerifier
+	| HttpVerifier
+	| SchemaVerifier;
 
 // ---------------------------------------------------------------------------
 // Trigger types (v0.3)
