@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { cmdBudget } from "./cli/budget.js";
 import { cmdCheck } from "./cli/check.js";
+import { cmdCompact } from "./cli/compact.js";
 import { cmdDiff } from "./cli/diff.js";
 import { cmdExport } from "./cli/export.js";
 import { cmdGateway, cmdGatewaySetup } from "./cli/gateway.js";
@@ -42,6 +43,7 @@ ${C.bold}USAGE${C.reset}
   evalgate swarm  [path] [--concurrency=N] [--resume] [--agent=cmd]
   evalgate swarm  status [path]       Show swarm worker status
   evalgate swarm  retry <id> [path]   Retry a single failed swarm worker
+  evalgate compact [path] [--max-age-days=N] [--max-rows=N] [--dry-run]
   evalgate gateway setup              Configure Telegram bot token and chat ID
   evalgate gateway [--todo=path]      Start Telegram bot gateway
   evalgate help                       Show this message
@@ -274,6 +276,13 @@ async function main(): Promise<void> {
 			}
 			const todoPath = resolve(pathArg ?? "todo.md");
 			exitCode = await cmdSwarm(todoPath, swarmArgs);
+			break;
+		}
+		case "compact": {
+			const flags = args.filter((a) => a.startsWith("--"));
+			const positional = args.filter((a) => !a.startsWith("--"));
+			const todoPath = resolve(positional[0] ?? "todo.md");
+			exitCode = await cmdCompact(todoPath, flags);
 			break;
 		}
 		case "gateway": {

@@ -157,260 +157,83 @@ function getDefaultModel(provider: LlmProvider): string {
 	return "claude-haiku-4-5-20251001";
 }
 
-async function runLlmJudge(
+// ---------------------------------------------------------------------------
+// LLM provider adapter pattern — eliminates 3× duplication in runLlmJudge
+// ---------------------------------------------------------------------------
+
+interface LlmProviderAdapter {
+	endpoint(baseUrl: string | undefined): URL;
+	headers(apiKey: string): Record<string, string | number>;
+	buildBody(model: string, systemPrompt: string): string;
+	parseText(json: unknown): string;
+	parseError(json: unknown): string | null;
+}
+
+const llmAdapters: Record<LlmProvider, LlmProviderAdapter> = {
+	anthropic: {
+		endpoint: (baseUrl) => new URL(`${baseUrl ?? "https://api.anthropic.com"}/v1/messages`),
+		headers: (apiKey) => ({
+			"Content-Type": "application/json",
+			"x-api-key": apiKey,
+			"anthropic-version": "2023-06-01",
+		}),
+		buildBody: (model, systemPrompt) =>
+			JSON.stringify({
+				model,
+				max_tokens: 64,
+				messages: [{ role: "user", content: systemPrompt }],
+			}),
+		parseText: (json) => (json as { content?: Array<{ text?: string }> }).content?.[0]?.text ?? "",
+		parseError: (json) => (json as { error?: { message: string } }).error?.message ?? null,
+	},
+	openai: {
+		endpoint: (baseUrl) => new URL(`${baseUrl ?? "https://api.openai.com"}/v1/chat/completions`),
+		headers: (apiKey) => ({
+			"Content-Type": "application/json",
+			Authorization: `Bearer ${apiKey}`,
+		}),
+		buildBody: (model, systemPrompt) =>
+			JSON.stringify({
+				model,
+				max_tokens: 64,
+				messages: [{ role: "user", content: systemPrompt }],
+			}),
+		parseText: (json) =>
+			(json as { choices?: Array<{ message?: { content?: string } }> }).choices?.[0]?.message
+				?.content ?? "",
+		parseError: (json) => (json as { error?: { message: string } }).error?.message ?? null,
+	},
+	ollama: {
+		endpoint: (baseUrl) => new URL(`${baseUrl ?? "http://localhost:11434"}/api/chat`),
+		headers: () => ({ "Content-Type": "application/json" }),
+		buildBody: (model, systemPrompt) =>
+			JSON.stringify({ model, stream: false, messages: [{ role: "user", content: systemPrompt }] }),
+		parseText: (json) => (json as { message?: { content?: string } }).message?.content ?? "",
+		parseError: (json) => {
+			const e = (json as { error?: string }).error;
+			return typeof e === "string" ? e : null;
+		},
+	},
+};
+
+const RETRYABLE_STATUS = new Set([429, 503]);
+const MAX_RETRIES = 1;
+const RETRY_DELAY_MS = 1500;
+
+async function llmRequest(
 	contract: Contract,
-	prompt: string,
+	adapter: LlmProviderAdapter,
+	apiKey: string,
 	model: string,
-	provider: LlmProvider = "anthropic",
-	baseUrl?: string,
+	systemPrompt: string,
+	baseUrl: string | undefined,
+	timeoutMs: number,
+	attempt = 0,
 ): Promise<RunResult> {
 	const start = Date.now();
-	const LLM_TIMEOUT_MS = 60_000;
-	const systemPrompt = `You are a code quality judge. Answer with exactly one word: PASS or FAIL.\n\n${prompt}`;
-
-	if (provider === "anthropic") {
-		const apiKey = process.env.ANTHROPIC_API_KEY;
-		if (!apiKey) {
-			return {
-				contract,
-				passed: false,
-				stdout: "",
-				stderr: "ANTHROPIC_API_KEY is not set — required for eval.llm verifiers",
-				exitCode: -1,
-				durationMs: 0,
-			};
-		}
-
-		const body = JSON.stringify({
-			model,
-			max_tokens: 64,
-			messages: [{ role: "user", content: systemPrompt }],
-		});
-
-		return new Promise((resolvePromise) => {
-			let settled = false;
-			function settle(result: RunResult): void {
-				if (settled) return;
-				settled = true;
-				resolvePromise(result);
-			}
-
-			const req = httpsRequest(
-				{
-					hostname: "api.anthropic.com",
-					path: "/v1/messages",
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						"x-api-key": apiKey,
-						"anthropic-version": "2023-06-01",
-						"Content-Length": Buffer.byteLength(body),
-					},
-				},
-				(res) => {
-					let raw = "";
-					res.on("data", (d) => {
-						raw += d;
-					});
-					res.on("end", () => {
-						const durationMs = Date.now() - start;
-						try {
-							const json = JSON.parse(raw) as {
-								content?: Array<{ text?: string }>;
-								error?: { message: string };
-							};
-							if (json.error) {
-								settle({
-									contract,
-									passed: false,
-									stdout: "",
-									stderr: json.error.message,
-									exitCode: -1,
-									durationMs,
-								});
-								return;
-							}
-							const text = (json.content?.[0]?.text ?? "").trim().toUpperCase();
-							const passed = text.startsWith("PASS");
-							settle({
-								contract,
-								passed,
-								stdout: text,
-								stderr: "",
-								exitCode: passed ? 0 : 1,
-								durationMs,
-							});
-						} catch (e) {
-							settle({
-								contract,
-								passed: false,
-								stdout: "",
-								stderr: `parse error: ${e}`,
-								exitCode: -1,
-								durationMs: Date.now() - start,
-							});
-						}
-					});
-				},
-			);
-
-			const timeoutTimer = setTimeout(() => {
-				req.destroy();
-				settle({
-					contract,
-					passed: false,
-					stdout: "",
-					stderr: `[evalgate] LLM verifier timed out after ${LLM_TIMEOUT_MS}ms`,
-					exitCode: -1,
-					durationMs: Date.now() - start,
-					timedOut: true,
-				});
-			}, LLM_TIMEOUT_MS);
-			if (timeoutTimer.unref) timeoutTimer.unref();
-
-			req.on("error", (e) => {
-				clearTimeout(timeoutTimer);
-				settle({
-					contract,
-					passed: false,
-					stdout: "",
-					stderr: e.message,
-					exitCode: -1,
-					durationMs: Date.now() - start,
-				});
-			});
-			req.write(body);
-			req.end();
-		});
-	}
-
-	if (provider === "openai") {
-		const apiKey = process.env.OPENAI_API_KEY;
-		if (!apiKey) {
-			return {
-				contract,
-				passed: false,
-				stdout: "",
-				stderr: "OPENAI_API_KEY is not set — required for eval.llm provider:openai verifiers",
-				exitCode: -1,
-				durationMs: 0,
-			};
-		}
-
-		const body = JSON.stringify({
-			model,
-			max_tokens: 64,
-			messages: [{ role: "user", content: systemPrompt }],
-		});
-
-		const endpoint = new URL(`${baseUrl ?? "https://api.openai.com"}/v1/chat/completions`);
-		const requestFn = endpoint.protocol === "https:" ? httpsRequest : httpRequest;
-
-		return new Promise((resolvePromise) => {
-			let settled = false;
-			function settle(result: RunResult): void {
-				if (settled) return;
-				settled = true;
-				resolvePromise(result);
-			}
-
-			const req = requestFn(
-				{
-					hostname: endpoint.hostname,
-					path: endpoint.pathname,
-					port: endpoint.port || (endpoint.protocol === "https:" ? 443 : 80),
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						Authorization: `Bearer ${apiKey}`,
-						"Content-Length": Buffer.byteLength(body),
-					},
-				},
-				(res) => {
-					let raw = "";
-					res.on("data", (d) => {
-						raw += d;
-					});
-					res.on("end", () => {
-						const durationMs = Date.now() - start;
-						try {
-							const json = JSON.parse(raw) as {
-								choices?: Array<{ message?: { content?: string } }>;
-								error?: { message: string };
-							};
-							if (json.error) {
-								settle({
-									contract,
-									passed: false,
-									stdout: "",
-									stderr: json.error.message,
-									exitCode: -1,
-									durationMs,
-								});
-								return;
-							}
-							const text = (json.choices?.[0]?.message?.content ?? "").trim().toUpperCase();
-							const passed = text.startsWith("PASS");
-							settle({
-								contract,
-								passed,
-								stdout: text,
-								stderr: "",
-								exitCode: passed ? 0 : 1,
-								durationMs,
-							});
-						} catch (e) {
-							settle({
-								contract,
-								passed: false,
-								stdout: "",
-								stderr: `parse error: ${e}`,
-								exitCode: -1,
-								durationMs: Date.now() - start,
-							});
-						}
-					});
-				},
-			);
-
-			const timeoutTimer = setTimeout(() => {
-				req.destroy();
-				settle({
-					contract,
-					passed: false,
-					stdout: "",
-					stderr: `[evalgate] LLM verifier timed out after ${LLM_TIMEOUT_MS}ms`,
-					exitCode: -1,
-					durationMs: Date.now() - start,
-					timedOut: true,
-				});
-			}, LLM_TIMEOUT_MS);
-			if (timeoutTimer.unref) timeoutTimer.unref();
-
-			req.on("error", (e) => {
-				clearTimeout(timeoutTimer);
-				settle({
-					contract,
-					passed: false,
-					stdout: "",
-					stderr: e.message,
-					exitCode: -1,
-					durationMs: Date.now() - start,
-				});
-			});
-			req.write(body);
-			req.end();
-		});
-	}
-
-	// ollama
-	const body = JSON.stringify({
-		model,
-		stream: false,
-		messages: [{ role: "user", content: systemPrompt }],
-	});
-
-	const endpoint = new URL(`${baseUrl ?? "http://localhost:11434"}/api/chat`);
+	const endpoint = adapter.endpoint(baseUrl);
+	const body = adapter.buildBody(model, systemPrompt);
+	const baseHeaders = adapter.headers(apiKey);
 	const requestFn = endpoint.protocol === "https:" ? httpsRequest : httpRequest;
 
 	return new Promise((resolvePromise) => {
@@ -424,13 +247,10 @@ async function runLlmJudge(
 		const req = requestFn(
 			{
 				hostname: endpoint.hostname,
-				path: endpoint.pathname,
+				path: endpoint.pathname + (endpoint.search || ""),
 				port: endpoint.port || (endpoint.protocol === "https:" ? 443 : 80),
 				method: "POST",
-				headers: {
-					"Content-Type": "application/json",
-					"Content-Length": Buffer.byteLength(body),
-				},
+				headers: { ...baseHeaders, "Content-Length": Buffer.byteLength(body) },
 			},
 			(res) => {
 				let raw = "";
@@ -439,23 +259,47 @@ async function runLlmJudge(
 				});
 				res.on("end", () => {
 					const durationMs = Date.now() - start;
+					if (RETRYABLE_STATUS.has(res.statusCode ?? 0) && attempt < MAX_RETRIES) {
+						setTimeout(() => {
+							llmRequest(
+								contract,
+								adapter,
+								apiKey,
+								model,
+								systemPrompt,
+								baseUrl,
+								timeoutMs,
+								attempt + 1,
+							)
+								.then(settle)
+								.catch(() => {
+									settle({
+										contract,
+										passed: false,
+										stdout: "",
+										stderr: `[evalgate] LLM request failed after retry (status ${res.statusCode ?? "??"})`,
+										exitCode: -1,
+										durationMs: Date.now() - start,
+									});
+								});
+						}, RETRY_DELAY_MS);
+						return;
+					}
 					try {
-						const json = JSON.parse(raw) as {
-							message?: { content?: string };
-							error?: string;
-						};
-						if (json.error) {
+						const json = JSON.parse(raw) as unknown;
+						const errMsg = adapter.parseError(json);
+						if (errMsg) {
 							settle({
 								contract,
 								passed: false,
 								stdout: "",
-								stderr: json.error,
+								stderr: errMsg,
 								exitCode: -1,
 								durationMs,
 							});
 							return;
 						}
-						const text = (json.message?.content ?? "").trim().toUpperCase();
+						const text = adapter.parseText(json).trim().toUpperCase();
 						const passed = text.startsWith("PASS");
 						settle({
 							contract,
@@ -485,12 +329,12 @@ async function runLlmJudge(
 				contract,
 				passed: false,
 				stdout: "",
-				stderr: `[evalgate] LLM verifier timed out after ${LLM_TIMEOUT_MS}ms`,
+				stderr: `[evalgate] LLM verifier timed out after ${timeoutMs}ms`,
 				exitCode: -1,
 				durationMs: Date.now() - start,
 				timedOut: true,
 			});
-		}, LLM_TIMEOUT_MS);
+		}, timeoutMs);
 		if (timeoutTimer.unref) timeoutTimer.unref();
 
 		req.on("error", (e) => {
@@ -507,6 +351,33 @@ async function runLlmJudge(
 		req.write(body);
 		req.end();
 	});
+}
+
+async function runLlmJudge(
+	contract: Contract,
+	prompt: string,
+	model: string,
+	provider: LlmProvider = "anthropic",
+	baseUrl?: string,
+): Promise<RunResult> {
+	const LLM_TIMEOUT_MS = 60_000;
+	const systemPrompt = `You are a code quality judge. Answer with exactly one word: PASS or FAIL.\n\n${prompt}`;
+	const adapter = llmAdapters[provider];
+
+	if (provider !== "ollama") {
+		const envVar =
+			provider === "anthropic" ? process.env.ANTHROPIC_API_KEY : process.env.OPENAI_API_KEY;
+		if (!envVar) {
+			const msg =
+				provider === "anthropic"
+					? "ANTHROPIC_API_KEY is not set — required for eval.llm verifiers"
+					: "OPENAI_API_KEY is not set — required for eval.llm provider:openai verifiers";
+			return { contract, passed: false, stdout: "", stderr: msg, exitCode: -1, durationMs: 0 };
+		}
+		return llmRequest(contract, adapter, envVar, model, systemPrompt, baseUrl, LLM_TIMEOUT_MS);
+	}
+
+	return llmRequest(contract, adapter, "", model, systemPrompt, baseUrl, LLM_TIMEOUT_MS);
 }
 
 async function runCode(v: CodeVerifier, cwd: string, contract: Contract): Promise<RunResult> {

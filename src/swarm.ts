@@ -88,10 +88,10 @@ export interface SwarmOptions {
 	 */
 	taskContext?: string;
 	/**
-	 * Abort signal — when aborted, stops spawning new workers after the current
-	 * batch completes. In-flight workers run to completion (or to agentTimeoutMs).
-	 * Abort granularity is one batch; remaining pending workers stay in "pending"
-	 * state so resumeSwarm() can pick them up.
+	 * Abort signal — when aborted, each pool slot stops grabbing new workers after
+	 * its current worker finishes. In-flight workers run to completion (or to
+	 * agentTimeoutMs). Remaining pending workers stay in "pending" state so
+	 * resumeSwarm() can pick them up.
 	 */
 	signal?: AbortSignal;
 	/**
@@ -648,11 +648,14 @@ export async function runSwarm(opts: SwarmOptions): Promise<SwarmResult> {
 	const contractMap = new Map(contracts.map((c) => [c.id, c]));
 	const allPending = state.workers.filter((w) => w.status === "pending");
 
-	// Sort by priority descending — higher priority workers run first.
+	// Sort by priority desc, then by weight desc as tiebreaker.
 	allPending.sort((a, b) => {
-		const pa = contractMap.get(a.contractId)?.priority ?? 0;
-		const pb = contractMap.get(b.contractId)?.priority ?? 0;
-		return pb - pa;
+		const ca = contractMap.get(a.contractId);
+		const cb = contractMap.get(b.contractId);
+		const pa = ca?.priority ?? 0;
+		const pb = cb?.priority ?? 0;
+		if (pb !== pa) return pb - pa;
+		return (cb?.weight ?? 1) - (ca?.weight ?? 1);
 	});
 
 	// Work-stealing pool: N slots each grab the next pending worker from the queue.

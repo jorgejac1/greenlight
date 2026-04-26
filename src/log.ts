@@ -122,6 +122,11 @@ function openFreshDb(dbPath: string, todoPath: string): DatabaseSync {
 	return db;
 }
 
+/** Exposed for compact.ts so both modules share the same connection cache. */
+export function getRunsDb(todoPath: string): DatabaseSync {
+	return getDb(todoPath);
+}
+
 function getDb(todoPath: string): DatabaseSync {
 	const dbPath = runsPath(todoPath);
 	const cached = _dbs.get(dbPath);

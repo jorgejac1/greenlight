@@ -70,6 +70,7 @@ export function parseTodo(source: string): Contract[] {
 			role: buildRole(fields),
 			mcpServers: buildMcpServers(fields),
 			priority: fields.priority ? parseInt(fields.priority, 10) : undefined,
+			weight: fields.weight ? parseInt(fields.weight, 10) : undefined,
 			retryIf: buildRetryIf(fields),
 			line: i,
 			rawLines,

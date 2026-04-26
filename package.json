@@ -1,6 +1,6 @@
 {
   "name": "evalgate",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Eval-gated todos for agentic coding. Your agents can't tick the checkbox until the verifier passes.",
   "type": "module",
   "bin": {
@@ -51,5 +51,8 @@
     "simple-git-hooks": "^2.13.1",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
+  },
+  "dependencies": {
+    "evalgate": "^3.0.0"
   }
 }

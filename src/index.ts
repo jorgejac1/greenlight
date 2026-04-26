@@ -7,6 +7,8 @@ export {
 } from "./budget.js";
 export type { CheckWatchHandle, CheckWatchOptions } from "./check-watch.js";
 export { startCheckWatch } from "./check-watch.js";
+export type { CompactOptions } from "./compact.js";
+export { compactLogs } from "./compact.js";
 export { matchesCron, nextFireMs, parseCron } from "./cron.js";
 export { startDash } from "./dash.js";
 export type { QueryOptions } from "./log.js";

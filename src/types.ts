@@ -31,6 +31,8 @@ export interface Contract {
 	mcpServers?: string[];
 	/** Scheduling priority — higher values run first in the work-stealing pool. Default 0. */
 	priority?: number;
+	/** Relative scheduling weight within the same priority tier — heavier contracts grab slots first. Default 1. */
+	weight?: number;
 	/** Conditional retry expression — only retry if condition is true. Default: always retry on failure. */
 	retryIf?: { exitCode: { op: "!=" | "==" | ">" | "<" | ">=" | "<="; value: number } };
 }
